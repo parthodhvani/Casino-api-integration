@@ -58,6 +58,26 @@ add_action('admin_init', function () {
     }
 });
 
+/* -- Admin notice when not configured yet -------------------------------- */
+
+add_action('admin_notices', function () {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+    // Don't nag on the settings page itself.
+    $screen = get_current_screen();
+    if ($screen && $screen->id === 'settings_page_jackpot-sync') {
+        return;
+    }
+    if (empty(jackpot_get('secret'))) {
+        $url = admin_url('options-general.php?page=jackpot-sync');
+        echo '<div class="notice notice-warning is-dismissible"><p>'
+           . '<strong>Jackpot Sync</strong> is active but not configured yet. '
+           . '<a href="' . esc_url($url) . '">Add your shared secret</a> to start receiving jackpot updates.'
+           . '</p></div>';
+    }
+});
+
 /* -- Status checks ------------------------------------------------------- */
 
 function jackpot_status_rows() {

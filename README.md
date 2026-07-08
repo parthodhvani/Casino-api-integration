@@ -34,8 +34,17 @@ independently.
 |--------|-------|------------|
 | `mqtt-listener/` | Node + HiveMQ | Holds the MQTT connection, parses messages, forwards to the Worker. Modular `src/` + tests. |
 | `cloudflare-worker/` | Cloudflare | Signs each payload and fans out to all WordPress sites (per-site config). |
-| `wordpress-plugin/jackpot-sync/` | WordPress/PHP | Signed REST endpoint + ACF writes + cache purge + retention cron. |
+| `wordpress-plugin/jackpot-sync/` | WordPress/PHP | Signed REST endpoint + ACF writes + cache purge + retention cron. Configured from an admin page (**Settings → Jackpot Sync**) — no file editing. |
+| `wordpress-plugin/jackpot-sync.zip` | — | Installable build for **Plugins → Add New → Upload Plugin**. |
 | `tools/` | Node | `simulate-message.js` — send a fake message to the Worker to test without live MQTT. |
+
+### Installing the WordPress plugin
+
+Upload `wordpress-plugin/jackpot-sync.zip` via **Plugins → Add New → Upload
+Plugin → Activate**, then configure it on **Settings → Jackpot Sync**. If the
+upload fails with *“No valid plugins were found”*, see Troubleshooting in
+[`SETUP.md`](SETUP.md) (usually a corrupted download — use GitHub's “Download
+raw file”, or upload the folder via SFTP).
 
 ## Message formats
 
