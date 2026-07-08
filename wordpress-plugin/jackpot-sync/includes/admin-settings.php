@@ -21,6 +21,14 @@ add_action('admin_menu', function () {
         'jackpot-sync',
         'jackpot_render_settings_page'
     );
+
+    add_management_page(
+        'Jackpot Tester',
+        'Jackpot Tester',
+        'manage_options',
+        'jackpot-sync-tester',
+        'jackpot_render_tester_page'
+    );
 });
 
 /* -- Register settings --------------------------------------------------- */
@@ -42,8 +50,43 @@ function jackpot_sanitize_settings($input) {
     $out['field_shared'] = !empty($input['field_shared']) ? sanitize_key($input['field_shared']) : $defaults['field_shared'];
     $out['divisor']      = (isset($input['divisor']) && (int) $input['divisor'] === 100) ? 100 : 1;
     $out['max_keep']     = isset($input['max_keep']) ? max(1, (int) $input['max_keep']) : $defaults['max_keep'];
+    $out['image_matching_mode'] = (isset($input['image_matching_mode']) && $input['image_matching_mode'] === 'jp_id') ? 'jp_id' : 'jp_name';
 
     return $out;
+}
+
+add_action('admin_post_jackpot_process_test_message', 'jackpot_process_test_message');
+
+function jackpot_process_test_message() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You do not have permission to access this page.', 'jackpot-sync'));
+    }
+
+    check_admin_referer('jackpot_sync_test_message');
+
+    $raw = isset($_POST['jackpot_test_message']) ? wp_unslash($_POST['jackpot_test_message']) : '';
+    $parsed = jackpot_parse_line_to_payload($raw);
+
+    $result = [
+        'ok'      => false,
+        'message' => 'Unable to process message.',
+        'status'  => 500,
+    ];
+
+    if (is_wp_error($parsed)) {
+        $result['message'] = $parsed->get_error_message();
+        $result['status']  = 400;
+    } else {
+        $response          = jackpot_process_payload($parsed, 'admin_tester');
+        $body              = $response->get_data();
+        $result['status']  = (int) $response->get_status();
+        $result['ok']      = $result['status'] >= 200 && $result['status'] < 300;
+        $result['message'] = is_array($body) ? wp_json_encode($body) : (string) $body;
+    }
+
+    set_transient('jackpot_sync_test_result_' . get_current_user_id(), $result, 120);
+    wp_safe_redirect(admin_url('tools.php?page=jackpot-sync-tester'));
+    exit;
 }
 
 /* -- Activation redirect (open settings automatically on activate) ------- */
@@ -121,11 +164,27 @@ function jackpot_render_settings_page() {
     $endpoint = jackpot_endpoint_url();
     $ping     = jackpot_ping_url();
     $log      = get_option('jackpot_sync_log', []);
+    $stats    = jackpot_get_stats();
     ?>
     <div class="wrap">
         <h1>Jackpot Sync</h1>
         <p>This plugin receives live jackpot data from your Cloudflare Worker and
         writes it into the jackpot posts and ACF fields. Follow the three steps below.</p>
+
+        <h2 class="title">Runtime overview</h2>
+        <table class="widefat striped" style="max-width:760px">
+            <tbody>
+            <tr><td style="width:220px"><strong>Last MQTT Update</strong></td><td><?php echo esc_html($stats['last_update'] ?: '—'); ?></td></tr>
+            <tr><td><strong>Last JPID</strong></td><td><?php echo esc_html($stats['last_jpid'] ?: '—'); ?></td></tr>
+            <tr><td><strong>Jackpots Created</strong></td><td><?php echo esc_html((string) $stats['jackpots_created']); ?></td></tr>
+            <tr><td><strong>Jackpots Updated</strong></td><td><?php echo esc_html((string) $stats['jackpots_updated']); ?></td></tr>
+            <tr><td><strong>Jackpots Skipped</strong></td><td><?php echo esc_html((string) $stats['jackpots_skipped']); ?></td></tr>
+            <tr><td><strong>Images Missing</strong></td><td><?php echo esc_html((string) $stats['images_missing']); ?></td></tr>
+            <tr><td><strong>Last Error</strong></td><td><?php echo esc_html($stats['last_error'] ?: '—'); ?></td></tr>
+            <tr><td><strong>Plugin Version</strong></td><td><?php echo esc_html(JACKPOT_SYNC_VERSION); ?></td></tr>
+            <tr><td><strong>Worker Status (Last Request)</strong></td><td><?php echo esc_html($stats['worker_status']); ?></td></tr>
+        </tbody>
+        </table>
 
         <!-- STATUS -->
         <h2 class="title">Status</h2>
@@ -190,7 +249,7 @@ function jackpot_render_settings_page() {
                     <td>
                         <input type="text" id="jp_field_amount" name="jackpot_sync_settings[field_amount]"
                                value="<?php echo esc_attr($s['field_amount']); ?>" class="regular-text">
-                        <p class="description">Field name for the current jackpot value. Default: <code>jackpot_amount</code>.</p>
+                        <p class="description">Field name for the current jackpot value. Default: <code>amount</code>.</p>
                     </td>
                 </tr>
                 <tr>
@@ -211,6 +270,16 @@ function jackpot_render_settings_page() {
                         <p class="description">If the feed sends <code>53467</code> and the real jackpot is
                         &euro;534.67, choose <strong>Cents</strong>. If it's &euro;53,467, choose <strong>Whole euros</strong>.
                         Verify against one live value before go-live.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Image matching mode</th>
+                    <td>
+                        <label><input type="radio" name="jackpot_sync_settings[image_matching_mode]" value="jp_name"
+                            <?php checked($s['image_matching_mode'], 'jp_name'); ?>> Match by <code>jpName</code></label><br>
+                        <label><input type="radio" name="jackpot_sync_settings[image_matching_mode]" value="jp_id"
+                            <?php checked($s['image_matching_mode'], 'jp_id'); ?>> Match by <code>jpId</code></label>
+                        <p class="description">Default is <strong>jpName</strong>. If no image is found the jackpot is still created and the event is logged.</p>
                     </td>
                 </tr>
                 <tr>
@@ -236,11 +305,58 @@ function jackpot_render_settings_page() {
             <?php else: foreach ($log as $entry): ?>
                 <tr>
                     <td><?php echo esc_html($entry['time']); ?></td>
-                    <td><?php echo esc_html($entry['msg']); ?></td>
+                    <td>
+                        <?php
+                        echo esc_html($entry['msg']);
+                        if (!empty($entry['context']) && is_array($entry['context'])) {
+                            echo '<br><code>' . esc_html(wp_json_encode($entry['context'])) . '</code>';
+                        }
+                        ?>
+                    </td>
                 </tr>
             <?php endforeach; endif; ?>
             </tbody>
         </table>
+    </div>
+    <?php
+}
+
+function jackpot_render_tester_page() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    $result = get_transient('jackpot_sync_test_result_' . get_current_user_id());
+    if ($result) {
+        delete_transient('jackpot_sync_test_result_' . get_current_user_id());
+    }
+    ?>
+    <div class="wrap">
+        <h1>Jackpot Tester</h1>
+        <p>Paste one raw message line and process it using the same logic as the REST endpoint.</p>
+        <?php if (!empty($result)): ?>
+            <div class="notice <?php echo !empty($result['ok']) ? 'notice-success' : 'notice-error'; ?>">
+                <p>
+                    <strong>Status:</strong> <?php echo esc_html((string) $result['status']); ?><br>
+                    <strong>Result:</strong> <?php echo esc_html($result['message']); ?>
+                </p>
+            </div>
+        <?php endif; ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <?php wp_nonce_field('jackpot_sync_test_message'); ?>
+            <input type="hidden" name="action" value="jackpot_process_test_message">
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="jackpot_test_message">Message</label></th>
+                    <td>
+                        <textarea id="jackpot_test_message" name="jackpot_test_message" rows="6" class="large-text code"
+                                  placeholder="JPCONFIG;O136;2;11;Huff n Puff Mystery LVL2;;IFCO"></textarea>
+                        <p class="description">Supported: <code>JPCONFIG;...</code> and <code>JPUPDATE;...</code></p>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button('Process'); ?>
+        </form>
     </div>
     <?php
 }

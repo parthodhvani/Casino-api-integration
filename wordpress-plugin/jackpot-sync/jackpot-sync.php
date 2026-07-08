@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Jackpot Sync
  * Description: Receives live jackpot data from the Cloudflare Worker and updates the Jackpot posts + ACF fields. Configure everything under Settings > Jackpot Sync.
- * Version:     2.0.0
+ * Version:     2.1.0
  * Author:      Rise Web
  * License:     GPLv2 or later
  *
@@ -15,10 +15,11 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('JACKPOT_SYNC_VERSION', '2.0.0');
+define('JACKPOT_SYNC_VERSION', '2.1.0');
 define('JACKPOT_SYNC_DIR', plugin_dir_path(__FILE__));
 
 require_once JACKPOT_SYNC_DIR . 'includes/helpers.php';
+require_once JACKPOT_SYNC_DIR . 'includes/services.php';
 require_once JACKPOT_SYNC_DIR . 'includes/rest-api.php';
 require_once JACKPOT_SYNC_DIR . 'includes/retention.php';
 
