@@ -1,0 +1,198 @@
+# Setup Guide — step by step
+
+This guide takes you from nothing to a working pipeline on **one site**
+(`casinoberck.fr`) for testing, then rolling out to all three.
+
+Do the parts in order.
+
+---
+
+## Part 0 — Generate your two secrets
+
+You need two random strings. Run this twice and save both outputs:
+
+```bash
+openssl rand -hex 32   # -> use as JACKPOT_SECRET  (Worker + WordPress)
+openssl rand -hex 32   # -> use as LISTENER_SECRET (Worker + Listener)
+```
+
+- **JACKPOT_SECRET** — shared between the Worker and WordPress (signs the payload).
+- **LISTENER_SECRET** — shared between the listener and the Worker (proves the caller is your listener).
+
+---
+
+## Part 1 — WordPress plugin (do this first, on site #1)
+
+1. Copy the folder `wordpress-plugin/jackpot-sync/` into the site's
+   `wp-content/plugins/` directory (via SFTP, Git, or the hosting file manager).
+
+2. Edit `wp-config.php` and add (above the “That's all, stop editing” line):
+
+   ```php
+   define('JACKPOT_SECRET', 'PASTE_YOUR_JACKPOT_SECRET');
+
+   // Optional overrides:
+   // define('JACKPOT_CPT', 'jackpot');        // CPT slug (default: jackpot)
+   // define('JACKPOT_MAX_KEEP', 20);          // retention limit
+   // define('JACKPOT_VALUE_DIVISOR', 1);      // set to 100 if values arrive in cents
+   ```
+
+3. In **wp-admin → Plugins**, activate **Jackpot Sync**.
+
+4. Verify the route is live (should return JSON, proves routing + WAF are OK):
+
+   ```bash
+   curl https://casinoberck.fr/wp-json/jackpot/v1/ping
+   # -> {"ok":true,"plugin":"jackpot-sync"}
+   ```
+
+   If this is blocked or returns a Combell error page, open a Combell support
+   ticket now to allowlist the route (see Part 5).
+
+---
+
+## Part 2 — Cloudflare Worker
+
+1. Install and log in:
+
+   ```bash
+   cd cloudflare-worker
+   npm install
+   npx wrangler login
+   ```
+
+2. Set the two secrets (paste the values from Part 0):
+
+   ```bash
+   npx wrangler secret put JACKPOT_SECRET
+   npx wrangler secret put LISTENER_SECRET
+   ```
+
+3. Set the target site(s) in `wrangler.toml`:
+
+   ```toml
+   [vars]
+   WP_ENDPOINTS = "https://casinoberck.fr/wp-json/jackpot/v1/update"
+   ```
+
+4. Deploy:
+
+   ```bash
+   npm run deploy
+   ```
+
+   Copy the printed URL, e.g. `https://jackpot-worker.<sub>.workers.dev`.
+
+5. (Optional) Open a live log stream in a separate terminal:
+
+   ```bash
+   npm run tail
+   ```
+
+---
+
+## Part 3 — MQTT listener (laptop for testing)
+
+1. Install and configure:
+
+   ```bash
+   cd mqtt-listener
+   npm install
+   cp .env.example .env
+   ```
+
+2. Edit `.env`:
+
+   ```env
+   MQTT_HOST=699e47e0f3cc47a58a4da1fbeff8f089.s1.eu.hivemq.cloud
+   MQTT_PORT=8883
+   MQTT_USERNAME=drgt.drTv
+   MQTT_PASSWORD=drTv1234
+   MQTT_TOPIC=/jp/gent
+   WORKER_URL=https://jackpot-worker.<sub>.workers.dev
+   LISTENER_SECRET=PASTE_YOUR_LISTENER_SECRET
+   ```
+
+3. Run it:
+
+   ```bash
+   npm start
+   ```
+
+   Expected:
+
+   ```
+   [mqtt] connected to mqtts://...hivemq.cloud:8883
+   [mqtt] subscribed to /jp/gent
+   [msg] /jp/gent => JPUPDATE;O136;2;0;217;53467;867;0;IFCO
+   [worker] 200 {"ok":true,...}
+   ```
+
+---
+
+## Part 4 — End-to-end verification
+
+Watch all layers in this order when a live message arrives:
+
+1. **Listener terminal** → `[msg] ...` then `[worker] 200`.
+2. **Worker logs** (`npm run tail`) → shows the incoming POST + per-site results.
+3. **WordPress** → `wp-admin/edit.php?post_type=jackpot`:
+   - First `JPCONFIG` for a jackpot creates a post.
+   - `JPUPDATE` changes `jackpot_amount` and `shared_profit_amount`.
+4. **Front-end carousel** → values update after cache purge.
+
+### Verify the euros-vs-cents question (important)
+
+Take one live `jpValue` and compare to the real displayed jackpot:
+
+- Real display `€534.67` and payload `53467` → it's **cents** → set `define('JACKPOT_VALUE_DIVISOR', 100);`
+- Real display `€53,467` and payload `53467` → it's **euros** → leave divisor at `1`.
+
+---
+
+## Part 5 — Combell WAF (do before you rely on it)
+
+If requests are blocked (403 / HTML error page instead of JSON):
+
+- Ask Combell support to **allowlist** the route `…/wp-json/jackpot/v1/update`
+  for the Cloudflare Worker's outbound IP ranges.
+- Confirm the `X-Signature` custom header is **not stripped** by their WAF.
+- Get a direct support contact so you can unblock quickly during testing.
+
+---
+
+## Part 6 — Retention
+
+The plugin schedules an hourly cron that keeps the newest 20 jackpots
+(by modified date) and deletes older ones. Change the limit with
+`define('JACKPOT_MAX_KEEP', 20);` in `wp-config.php`.
+
+> If WP-Cron is unreliable on the host (low traffic), disable it and use a real
+> Combell cron hitting `wp-cron.php` on a schedule:
+> add `define('DISABLE_WP_CRON', true);` and configure the server cron.
+
+---
+
+## Part 7 — Roll out to sites 2 and 3
+
+1. Repeat **Part 1** on each remaining site (same plugin, same `JACKPOT_SECRET`).
+2. Add their endpoint URLs to `WP_ENDPOINTS` in `wrangler.toml`, comma-separated:
+
+   ```toml
+   WP_ENDPOINTS = "https://siteA/wp-json/jackpot/v1/update,https://siteB/wp-json/jackpot/v1/update,https://siteC/wp-json/jackpot/v1/update"
+   ```
+
+3. `npm run deploy` again. The one Worker now fans out to all three.
+
+---
+
+## Part 8 — Production (move the listener off your laptop)
+
+Deploy the listener to an always-on host (see `mqtt-listener/README.md` for
+Render steps). Set the same env vars there. Consider upgrading to Cloudflare
+Workers Paid for headroom and better log retention.
+
+### Recommended monitoring
+
+- A free "dead man's switch" (e.g. Healthchecks.io) pinged by the listener on
+  each successful message — alerts you if the feed goes silent.

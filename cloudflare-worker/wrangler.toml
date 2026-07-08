@@ -1,0 +1,12 @@
+name = "jackpot-worker"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Comma-separated list of WordPress REST endpoints to fan out to.
+# Start with one site for testing, then add the other two.
+[vars]
+WP_ENDPOINTS = "https://casinoberck.fr/wp-json/jackpot/v1/update"
+
+# Secrets are NOT stored here. Set them with:
+#   wrangler secret put JACKPOT_SECRET
+#   wrangler secret put LISTENER_SECRET
