@@ -1,25 +1,24 @@
 /**
- * Test tool: send a fake jackpot message to the Cloudflare Worker,
- * WITHOUT waiting for a real MQTT message.
+ * Test tool: send a fake jackpot message without waiting for real MQTT.
  *
- * This exercises the Worker -> WordPress path (signature, ACF write, cache purge).
- * Requires Node.js 18+.
+ * Two modes:
  *
- * Usage:
- *   WORKER_URL=... LISTENER_SECRET=... node tools/simulate-message.js config
- *   WORKER_URL=... LISTENER_SECRET=... node tools/simulate-message.js update
+ *   1. Via the Worker (default) — exercises Worker -> WordPress:
+ *        WORKER_URL=... LISTENER_SECRET=... node tools/simulate-message.js config
+ *        WORKER_URL=... LISTENER_SECRET=... node tools/simulate-message.js update
  *
- * The default jpId/casId match the brief's example (O136 / IFCO).
+ *   2. Direct to WordPress (--direct) — signs the body itself and POSTs straight
+ *      to a site, bypassing the Worker (useful for isolating WP issues):
+ *        WP_URL=https://site/wp-json/jackpot/v1/update JACKPOT_SECRET=... \
+ *          node tools/simulate-message.js update --direct
+ *
+ * Requires Node.js 18+ (built-in fetch + crypto).
  */
 
-const { WORKER_URL, LISTENER_SECRET } = process.env;
-
-if (!WORKER_URL || !LISTENER_SECRET) {
-  console.error('Set WORKER_URL and LISTENER_SECRET env vars first.');
-  process.exit(1);
-}
+const crypto = require('crypto');
 
 const kind = (process.argv[2] || 'update').toLowerCase();
+const direct = process.argv.includes('--direct');
 
 const payloads = {
   config: {
@@ -47,16 +46,49 @@ if (!payload) {
   process.exit(1);
 }
 
-(async () => {
-  console.log(`Sending ${payload.type} to ${WORKER_URL}`);
+async function viaWorker() {
+  const { WORKER_URL, LISTENER_SECRET } = process.env;
+  if (!WORKER_URL || !LISTENER_SECRET) {
+    console.error('Set WORKER_URL and LISTENER_SECRET env vars first.');
+    process.exit(1);
+  }
+  console.log(`Sending ${payload.type} to Worker ${WORKER_URL}`);
   const res = await fetch(WORKER_URL, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-listener-secret': LISTENER_SECRET,
-    },
+    headers: { 'content-type': 'application/json', 'x-listener-secret': LISTENER_SECRET },
     body: JSON.stringify(payload),
   });
   console.log(`HTTP ${res.status}`);
   console.log(await res.text());
+}
+
+async function directToWordPress() {
+  const { WP_URL, JACKPOT_SECRET } = process.env;
+  if (!WP_URL || !JACKPOT_SECRET) {
+    console.error('For --direct set WP_URL and JACKPOT_SECRET env vars.');
+    process.exit(1);
+  }
+  const body = JSON.stringify(payload);
+  const signature = crypto.createHmac('sha256', JACKPOT_SECRET).update(body).digest('hex');
+  console.log(`Sending ${payload.type} directly to WordPress ${WP_URL}`);
+  const res = await fetch(WP_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-signature': signature },
+    body,
+  });
+  console.log(`HTTP ${res.status}`);
+  console.log(await res.text());
+}
+
+(async () => {
+  try {
+    if (direct) {
+      await directToWordPress();
+    } else {
+      await viaWorker();
+    }
+  } catch (err) {
+    console.error('Request failed:', err.message);
+    process.exit(1);
+  }
 })();

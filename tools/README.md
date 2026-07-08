@@ -20,3 +20,13 @@ node tools/simulate-message.js update
 ```
 
 Watch the result in `wrangler tail` (Worker) and in wp-admin (the jackpot post).
+
+### Direct-to-WordPress mode
+
+Bypass the Worker and sign the request yourself (useful to isolate WP issues):
+
+```bash
+WP_URL="https://YOUR-SITE/wp-json/jackpot/v1/update" \
+JACKPOT_SECRET="your-secret" \
+node tools/simulate-message.js update --direct
+```

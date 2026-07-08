@@ -11,6 +11,12 @@ compatibility_date = "2026-01-01"
 [vars]
 WP_SITES = '[{"name":"berck","url":"https://casinoberck.fr/wp-json/jackpot/v1/update"}]'
 
+# Optional tuning for the WordPress fan-out (safe defaults shown):
+#   FORWARD_RETRIES     - retries on network error / 5xx (default 2)
+#   FORWARD_TIMEOUT_MS  - per-request timeout in ms (default 8000)
+FORWARD_RETRIES = "2"
+FORWARD_TIMEOUT_MS = "8000"
+
 # Secrets are NOT stored here. Set them with:
 #   wrangler secret put LISTENER_SECRET
 #   wrangler secret put JACKPOT_SECRET

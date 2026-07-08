@@ -1,45 +1,44 @@
 /**
- * Minimal parser tests. Run with: npm test
+ * Parser tests. Run with: npm test  (node --test)
  */
-const assert = require('assert');
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
 const { parseMessage } = require('../src/parser');
 
-let passed = 0;
-function check(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ok  - ${name}`);
-  } catch (err) {
-    console.error(`  FAIL - ${name}: ${err.message}`);
-    process.exitCode = 1;
-  }
-}
-
-check('parses JPCONFIG', () => {
+test('parses JPCONFIG', () => {
   const r = parseMessage('JPCONFIG;O136;2;11;Huff n Puff Mystery LVL2;;IFCO');
-  assert.strictEqual(r.type, 'JPCONFIG');
-  assert.strictEqual(r.jpId, 'O136');
-  assert.strictEqual(r.jpName, 'Huff n Puff Mystery LVL2');
-  assert.strictEqual(r.casId, 'IFCO');
+  assert.equal(r.type, 'JPCONFIG');
+  assert.equal(r.jpId, 'O136');
+  assert.equal(r.jpName, 'Huff n Puff Mystery LVL2');
+  assert.equal(r.casId, 'IFCO');
 });
 
-check('parses JPUPDATE', () => {
+test('parses JPUPDATE', () => {
   const r = parseMessage('JPUPDATE;O136;2;0;217;53467;867;0;IFCO');
-  assert.strictEqual(r.type, 'JPUPDATE');
-  assert.strictEqual(r.jpId, 'O136');
-  assert.strictEqual(r.jpValue, '53467');
-  assert.strictEqual(r.jpShared, '867');
-  assert.strictEqual(r.casId, 'IFCO');
+  assert.equal(r.type, 'JPUPDATE');
+  assert.equal(r.jpId, 'O136');
+  assert.equal(r.jpValue, '53467');
+  assert.equal(r.jpShared, '867');
+  assert.equal(r.casId, 'IFCO');
 });
 
-check('rejects unknown type', () => {
-  assert.strictEqual(parseMessage('FOO;1;2;3'), null);
+test('trims surrounding whitespace', () => {
+  const r = parseMessage('  JPUPDATE;O136;2;0;217;53467;867;0;IFCO  ');
+  assert.equal(r.jpId, 'O136');
+  assert.equal(r.casId, 'IFCO');
 });
 
-check('rejects empty / malformed', () => {
-  assert.strictEqual(parseMessage(''), null);
-  assert.strictEqual(parseMessage('JPUPDATE;O136'), null);
+test('rejects unknown type', () => {
+  assert.equal(parseMessage('FOO;1;2;3'), null);
 });
 
-console.log(`\n${passed} checks passed.`);
+test('rejects empty / malformed', () => {
+  assert.equal(parseMessage(''), null);
+  assert.equal(parseMessage('JPUPDATE;O136'), null);
+  assert.equal(parseMessage(null), null);
+});
+
+test('rejects JPCONFIG missing jpId or casId', () => {
+  assert.equal(parseMessage('JPCONFIG;;2;11;Name;;IFCO'), null);
+  assert.equal(parseMessage('JPCONFIG;O136;2;11;Name;;'), null);
+});

@@ -47,7 +47,15 @@ npm run tail     # live logs
 
 ## Contract
 
-- Accepts `POST` with header `x-listener-secret: <LISTENER_SECRET>`.
-- Body is any JSON; it is forwarded verbatim to each WordPress site.
-- Adds header `x-signature: <hmac-sha256(site secret or JACKPOT_SECRET, body)>`.
-- Returns `200` if all sites succeeded, `207` if some failed (per-site detail in `results`).
+- Accepts `POST` with header `x-listener-secret: <LISTENER_SECRET>` (checked in
+  constant time).
+- Body is a JSON message object, or a JSON array of messages (batching).
+- Each message is validated (`type`, `jpId`, `casId`, required fields). Invalid
+  messages are reported in `rejected`; a batch with none valid returns `400`.
+- For each valid message and each site, adds
+  `x-signature: <hmac-sha256(site secret or JACKPOT_SECRET, JSON.stringify(message))>`
+  and POSTs it, retrying network/5xx errors with backoff + timeout.
+- Returns `200` if everything succeeded, `207` if any site/message failed
+  (per-message, per-site detail in `results`), plus a `metrics` summary.
+
+Optional tuning vars (`wrangler.toml`): `FORWARD_RETRIES`, `FORWARD_TIMEOUT_MS`.
