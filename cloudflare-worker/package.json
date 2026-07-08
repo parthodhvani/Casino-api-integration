@@ -1,14 +1,19 @@
 {
   "name": "jackpot-worker",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Cloudflare Worker that signs and fans out jackpot updates to WordPress sites.",
+  "type": "module",
+  "description": "Cloudflare Worker that authenticates, validates, signs and fans out jackpot updates to WordPress sites.",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node --test"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "^4.42.0"
   }
 }
