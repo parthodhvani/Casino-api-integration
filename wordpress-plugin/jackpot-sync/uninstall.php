@@ -2,6 +2,8 @@
 /**
  * Runs when the plugin is deleted from wp-admin. Cleans up stored options.
  * (Jackpot posts are intentionally left in place.)
+ *
+ * @package JackpotSync
  */
 
 if (!defined('WP_UNINSTALL_PLUGIN')) {
