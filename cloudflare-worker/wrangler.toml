@@ -1,0 +1,16 @@
+name = "jackpot-worker"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# List of WordPress sites to fan out to (JSON).
+# Start with ONE site for testing, then add the other two.
+#
+# Each site: { "name": "...", "url": "...", "secret": "..."(optional) }
+#   - If "secret" is omitted, the Worker uses the shared JACKPOT_SECRET.
+#   - Give a site its own "secret" only if you want per-site isolation.
+[vars]
+WP_SITES = '[{"name":"berck","url":"https://casinoberck.fr/wp-json/jackpot/v1/update"}]'
+
+# Secrets are NOT stored here. Set them with:
+#   wrangler secret put LISTENER_SECRET
+#   wrangler secret put JACKPOT_SECRET
