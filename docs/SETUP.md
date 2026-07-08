@@ -27,13 +27,13 @@ The plugin is configured from an admin page — **no `wp-config.php` editing nee
 
 ### 1a. Get the zip
 
-Download `wordpress-plugin/jackpot-sync.zip` from the repo. On GitHub, open the
-file and click **“Download raw file”** (do not copy/paste the contents — it's a
-binary). Or build it yourself:
+Download `wordpress-plugin/jackpot-sync-v3.0.0.zip` from the repo. On GitHub,
+open the file and click **“Download raw file”** (do not copy/paste the contents
+— it's a binary). Or build it yourself:
 
 ```bash
 cd wordpress-plugin
-zip -rX jackpot-sync.zip jackpot-sync
+zip -rX jackpot-sync-v3.0.0.zip jackpot-sync
 ```
 
 ### 1b. Install
@@ -51,9 +51,10 @@ zip -rX jackpot-sync.zip jackpot-sync
 
 1. Paste your **shared secret** (the `JACKPOT_SECRET` value).
 2. Confirm the CPT slug (`jackpot`) and ACF field names
-   (`jackpot_amount`, `shared_profit_amount`) — defaults already match this site.
-3. Choose the **value format** (whole euros vs cents).
-4. **Save**. Check the green status boxes: secret set, ACF active, CPT exists.
+   (`amount`, `shared_profit_amount`) — defaults already match this site.
+3. Choose the **value format** (whole units vs cents) and **image matching mode**.
+4. **Save**. Check the green status boxes: secret set, ACF active, CPT exists,
+   retention cron scheduled.
 
 ### 1d. Verify the route is live
 
