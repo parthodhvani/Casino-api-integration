@@ -68,11 +68,11 @@ openssl rand -hex 32   # -> use as LISTENER_SECRET (Worker + Listener)
    npx wrangler secret put LISTENER_SECRET
    ```
 
-3. Set the target site(s) in `wrangler.toml`:
+3. Set the target site(s) in `wrangler.toml` (start with one):
 
    ```toml
    [vars]
-   WP_ENDPOINTS = "https://casinoberck.fr/wp-json/jackpot/v1/update"
+   WP_SITES = '[{"name":"berck","url":"https://casinoberck.fr/wp-json/jackpot/v1/update"}]'
    ```
 
 4. Deploy:
@@ -132,7 +132,20 @@ openssl rand -hex 32   # -> use as LISTENER_SECRET (Worker + Listener)
 
 ## Part 4 — End-to-end verification
 
-Watch all layers in this order when a live message arrives:
+**Don't want to wait for a live MQTT message?** Simulate one to test the
+Worker → WordPress path instantly:
+
+```bash
+WORKER_URL="https://jackpot-worker.<sub>.workers.dev" \
+LISTENER_SECRET="your-listener-secret" \
+node tools/simulate-message.js config   # creates the jackpot post
+
+WORKER_URL="https://jackpot-worker.<sub>.workers.dev" \
+LISTENER_SECRET="your-listener-secret" \
+node tools/simulate-message.js update    # updates the values
+```
+
+Watch all layers in this order when a (real or simulated) message arrives:
 
 1. **Listener terminal** → `[msg] ...` then `[worker] 200`.
 2. **Worker logs** (`npm run tail`) → shows the incoming POST + per-site results.
@@ -176,13 +189,20 @@ The plugin schedules an hourly cron that keeps the newest 20 jackpots
 ## Part 7 — Roll out to sites 2 and 3
 
 1. Repeat **Part 1** on each remaining site (same plugin, same `JACKPOT_SECRET`).
-2. Add their endpoint URLs to `WP_ENDPOINTS` in `wrangler.toml`, comma-separated:
+2. Add their URLs to `WP_SITES` in `wrangler.toml`:
 
    ```toml
-   WP_ENDPOINTS = "https://siteA/wp-json/jackpot/v1/update,https://siteB/wp-json/jackpot/v1/update,https://siteC/wp-json/jackpot/v1/update"
+   WP_SITES = '[
+     {"name":"berck","url":"https://siteA/wp-json/jackpot/v1/update"},
+     {"name":"oostende","url":"https://siteB/wp-json/jackpot/v1/update"},
+     {"name":"dinant","url":"https://siteC/wp-json/jackpot/v1/update"}
+   ]'
    ```
 
 3. `npm run deploy` again. The one Worker now fans out to all three.
+
+> Want per-site secrets instead of one shared secret? Add `"secret":"..."` to a
+> site in `WP_SITES` and use that same value in that site's `wp-config.php`.
 
 ---
 

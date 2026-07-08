@@ -27,11 +27,15 @@ session alive; the Worker does the signing and fan-out to the 3 sites.
 
 ## Repository layout
 
-| Folder | What it is |
-|--------|------------|
-| `mqtt-listener/` | Node.js service that holds the MQTT connection and forwards messages. |
-| `cloudflare-worker/` | Cloudflare Worker that signs and fans out to WordPress sites. |
-| `wordpress-plugin/jackpot-sync/` | WordPress plugin: signed REST endpoint + ACF writes + retention cron. |
+Each part is fully self-contained so you can develop, test, and deploy them
+independently.
+
+| Folder | Stack | What it is |
+|--------|-------|------------|
+| `mqtt-listener/` | Node + HiveMQ | Holds the MQTT connection, parses messages, forwards to the Worker. Modular `src/` + tests. |
+| `cloudflare-worker/` | Cloudflare | Signs each payload and fans out to all WordPress sites (per-site config). |
+| `wordpress-plugin/jackpot-sync/` | WordPress/PHP | Signed REST endpoint + ACF writes + cache purge + retention cron. |
+| `tools/` | Node | `simulate-message.js` — send a fake message to the Worker to test without live MQTT. |
 
 ## Message formats
 
@@ -53,14 +57,29 @@ JPUPDATE;O136;2;0;217;53467;867;0;IFCO
 ## Security model
 
 - The listener authenticates to the Worker with a shared header `x-listener-secret` (`LISTENER_SECRET`).
-- The Worker signs each forwarded body with HMAC-SHA256 (`JACKPOT_SECRET`).
-- WordPress rejects any request whose `X-Signature` doesn't match.
+- The Worker signs each forwarded body with HMAC-SHA256 and WordPress verifies the `X-Signature`.
+- WordPress rejects any request whose signature doesn't match.
 
-Generate each secret with:
+Generate each secret once with:
 
 ```bash
 openssl rand -hex 32
 ```
+
+### Where the two secrets live
+
+| Secret | Listener | Worker | WordPress (all 3 sites) |
+|--------|:--------:|:------:|:-----------------------:|
+| `LISTENER_SECRET` | ✅ | ✅ | — |
+| `JACKPOT_SECRET`  | — | ✅ | ✅ |
+
+- You generate the secrets **once** — not once per site.
+- `JACKPOT_SECRET`: the **same value** goes in the Worker and in every site's
+  `wp-config.php`. (Optional: give each site its own secret via `WP_SITES` for
+  stronger isolation — see `cloudflare-worker/README.md`.)
+- **You (the developer) set these up** in both test and production. The client
+  never runs these commands; they only approve the budget and grant access.
+  On your laptop = testing; on the always-on host = production. Same steps.
 
 ## What to buy (production)
 

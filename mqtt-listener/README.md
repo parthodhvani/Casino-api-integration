@@ -1,10 +1,22 @@
-# MQTT Listener
+# MQTT Listener (Node + HiveMQ)
 
 Holds the persistent connection to HiveMQ, parses DRGT messages, and forwards
 normalized JSON to the Cloudflare Worker.
 
 - **Testing:** run on your laptop (free).
 - **Production:** run on an always-on host (Render / Fly.io / VPS, ~$5-7/month).
+
+## Structure
+
+```
+src/
+  index.js      entry point (MQTT connection wiring)
+  config.js     env var loading + validation
+  parser.js     DRGT message parsing (JPCONFIG / JPUPDATE)
+  forwarder.js  sends normalized JSON to the Worker
+test/
+  parser.test.js
+```
 
 ## Setup
 
@@ -20,7 +32,8 @@ Requires **Node.js 18+** (uses the built-in `fetch`).
 ## Run
 
 ```bash
-npm start
+npm start     # start the listener
+npm test      # run parser tests (no network needed)
 ```
 
 You should see:
