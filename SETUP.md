@@ -23,31 +23,49 @@ openssl rand -hex 32   # -> use as LISTENER_SECRET (Worker + Listener)
 
 ## Part 1 — WordPress plugin (do this first, on site #1)
 
-1. Copy the folder `wordpress-plugin/jackpot-sync/` into the site's
-   `wp-content/plugins/` directory (via SFTP, Git, or the hosting file manager).
+The plugin is configured from an admin page — **no `wp-config.php` editing needed.**
 
-2. Edit `wp-config.php` and add (above the “That's all, stop editing” line):
+### 1a. Get the zip
 
-   ```php
-   define('JACKPOT_SECRET', 'PASTE_YOUR_JACKPOT_SECRET');
+Download `wordpress-plugin/jackpot-sync.zip` from the repo. On GitHub, open the
+file and click **“Download raw file”** (do not copy/paste the contents — it's a
+binary). Or build it yourself:
 
-   // Optional overrides:
-   // define('JACKPOT_CPT', 'jackpot');        // CPT slug (default: jackpot)
-   // define('JACKPOT_MAX_KEEP', 20);          // retention limit
-   // define('JACKPOT_VALUE_DIVISOR', 1);      // set to 100 if values arrive in cents
-   ```
+```bash
+cd wordpress-plugin
+zip -rX jackpot-sync.zip jackpot-sync
+```
 
-3. In **wp-admin → Plugins**, activate **Jackpot Sync**.
+### 1b. Install
 
-4. Verify the route is live (should return JSON, proves routing + WAF are OK):
+1. **wp-admin → Plugins → Add New → Upload Plugin**.
+2. Choose `jackpot-sync.zip` → **Install Now** → **Activate**.
+3. You are taken to **Settings → Jackpot Sync** automatically.
 
-   ```bash
-   curl https://casinoberck.fr/wp-json/jackpot/v1/ping
-   # -> {"ok":true,"plugin":"jackpot-sync"}
-   ```
+> If you see *“No valid plugins were found”*, the zip was corrupted during
+> download (see Troubleshooting at the end). Re-download with “Download raw
+> file”, or upload the `jackpot-sync` folder directly via SFTP to
+> `wp-content/plugins/` instead.
 
-   If this is blocked or returns a Combell error page, open a Combell support
-   ticket now to allowlist the route (see Part 5).
+### 1c. Configure (on the settings page)
+
+1. Paste your **shared secret** (the `JACKPOT_SECRET` value).
+2. Confirm the CPT slug (`jackpot`) and ACF field names
+   (`jackpot_amount`, `shared_profit_amount`) — defaults already match this site.
+3. Choose the **value format** (whole euros vs cents).
+4. **Save**. Check the green status boxes: secret set, ACF active, CPT exists.
+
+### 1d. Verify the route is live
+
+Click the health-check link on the settings page, or:
+
+```bash
+curl https://casinoberck.fr/wp-json/jackpot/v1/ping
+# -> {"ok":true,"plugin":"jackpot-sync","secret":true}
+```
+
+If this is blocked or returns a Combell error page, open a Combell support
+ticket now to allowlist the route (see Part 5).
 
 ---
 
@@ -68,11 +86,11 @@ openssl rand -hex 32   # -> use as LISTENER_SECRET (Worker + Listener)
    npx wrangler secret put LISTENER_SECRET
    ```
 
-3. Set the target site(s) in `wrangler.toml`:
+3. Set the target site(s) in `wrangler.toml` (start with one):
 
    ```toml
    [vars]
-   WP_ENDPOINTS = "https://casinoberck.fr/wp-json/jackpot/v1/update"
+   WP_SITES = '[{"name":"berck","url":"https://casinoberck.fr/wp-json/jackpot/v1/update"}]'
    ```
 
 4. Deploy:
@@ -132,7 +150,20 @@ openssl rand -hex 32   # -> use as LISTENER_SECRET (Worker + Listener)
 
 ## Part 4 — End-to-end verification
 
-Watch all layers in this order when a live message arrives:
+**Don't want to wait for a live MQTT message?** Simulate one to test the
+Worker → WordPress path instantly:
+
+```bash
+WORKER_URL="https://jackpot-worker.<sub>.workers.dev" \
+LISTENER_SECRET="your-listener-secret" \
+node tools/simulate-message.js config   # creates the jackpot post
+
+WORKER_URL="https://jackpot-worker.<sub>.workers.dev" \
+LISTENER_SECRET="your-listener-secret" \
+node tools/simulate-message.js update    # updates the values
+```
+
+Watch all layers in this order when a (real or simulated) message arrives:
 
 1. **Listener terminal** → `[msg] ...` then `[worker] 200`.
 2. **Worker logs** (`npm run tail`) → shows the incoming POST + per-site results.
@@ -145,8 +176,8 @@ Watch all layers in this order when a live message arrives:
 
 Take one live `jpValue` and compare to the real displayed jackpot:
 
-- Real display `€534.67` and payload `53467` → it's **cents** → set `define('JACKPOT_VALUE_DIVISOR', 100);`
-- Real display `€53,467` and payload `53467` → it's **euros** → leave divisor at `1`.
+- Real display `€534.67` and payload `53467` → it's **cents** → choose **Cents** on the settings page.
+- Real display `€53,467` and payload `53467` → it's **euros** → choose **Whole euros**.
 
 ---
 
@@ -163,9 +194,9 @@ If requests are blocked (403 / HTML error page instead of JSON):
 
 ## Part 6 — Retention
 
-The plugin schedules an hourly cron that keeps the newest 20 jackpots
-(by modified date) and deletes older ones. Change the limit with
-`define('JACKPOT_MAX_KEEP', 20);` in `wp-config.php`.
+The plugin schedules an hourly cron that keeps the newest N jackpots
+(by modified date) and deletes older ones. Set the limit under
+**Settings → Jackpot Sync → Keep newest** (default 20).
 
 > If WP-Cron is unreliable on the host (low traffic), disable it and use a real
 > Combell cron hitting `wp-cron.php` on a schedule:
@@ -175,14 +206,21 @@ The plugin schedules an hourly cron that keeps the newest 20 jackpots
 
 ## Part 7 — Roll out to sites 2 and 3
 
-1. Repeat **Part 1** on each remaining site (same plugin, same `JACKPOT_SECRET`).
-2. Add their endpoint URLs to `WP_ENDPOINTS` in `wrangler.toml`, comma-separated:
+1. Repeat **Part 1** on each remaining site (same zip, same shared secret pasted on each settings page).
+2. Add their URLs to `WP_SITES` in `wrangler.toml`:
 
    ```toml
-   WP_ENDPOINTS = "https://siteA/wp-json/jackpot/v1/update,https://siteB/wp-json/jackpot/v1/update,https://siteC/wp-json/jackpot/v1/update"
+   WP_SITES = '[
+     {"name":"berck","url":"https://siteA/wp-json/jackpot/v1/update"},
+     {"name":"oostende","url":"https://siteB/wp-json/jackpot/v1/update"},
+     {"name":"dinant","url":"https://siteC/wp-json/jackpot/v1/update"}
+   ]'
    ```
 
 3. `npm run deploy` again. The one Worker now fans out to all three.
+
+> Want per-site secrets instead of one shared secret? Add `"secret":"..."` to a
+> site in `WP_SITES` and use that same value in that site's `wp-config.php`.
 
 ---
 
@@ -196,3 +234,43 @@ Workers Paid for headroom and better log retention.
 
 - A free "dead man's switch" (e.g. Healthchecks.io) pinged by the listener on
   each successful message — alerts you if the feed goes silent.
+
+---
+
+## Troubleshooting
+
+### “The package could not be installed. No valid plugins were found.”
+
+This means WordPress received a broken or wrongly-structured zip. Fixes, in order:
+
+1. **Re-download correctly.** On GitHub, open `jackpot-sync.zip` and use the
+   **“Download raw file”** button. Don't right-click the raw view and “Save as”,
+   and don't `git pull` the zip on a machine with `core.autocrlf=true` — that can
+   corrupt binaries. (This repo now marks `*.zip` as binary via `.gitattributes`
+   to prevent that.)
+2. **Check the structure.** The zip must contain a single top-level folder
+   `jackpot-sync/` with `jackpot-sync.php` directly inside it. Verify with:
+
+   ```bash
+   unzip -l jackpot-sync.zip
+   ```
+
+3. **Rebuild it yourself** (guaranteed clean):
+
+   ```bash
+   cd wordpress-plugin
+   zip -rX jackpot-sync.zip jackpot-sync
+   ```
+
+4. **Skip the zip entirely.** Upload the `jackpot-sync` **folder** directly to
+   `wp-content/plugins/` via SFTP / the Combell file manager, then activate it
+   from **Plugins**. This always works.
+
+### The endpoint returns 401 / “signature mismatch”
+
+The secret on the settings page must be **exactly** the Worker's `JACKPOT_SECRET`
+(no extra spaces, full length). Re-paste both.
+
+### `/ping` returns a Combell/HTML error instead of JSON
+
+The WAF is blocking the route — see Part 5.

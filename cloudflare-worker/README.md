@@ -18,13 +18,24 @@ npx wrangler secret put JACKPOT_SECRET     # same value as WordPress wp-config.p
 npx wrangler secret put LISTENER_SECRET    # a second random value for the listener
 ```
 
-## Configure endpoints
+## Configure sites
 
-Edit `wrangler.toml` -> `WP_ENDPOINTS`. Comma-separate multiple sites:
+Edit `wrangler.toml` -> `WP_SITES` (a JSON array). Start with one site, add more later:
 
 ```toml
-WP_ENDPOINTS = "https://siteA/wp-json/jackpot/v1/update,https://siteB/wp-json/jackpot/v1/update"
+# one shared secret for all sites (simple):
+WP_SITES = '[{"name":"berck","url":"https://siteA/wp-json/jackpot/v1/update"}]'
+
+# multiple sites, optional per-site secret (stronger isolation):
+WP_SITES = '[
+  {"name":"berck","url":"https://siteA/wp-json/jackpot/v1/update"},
+  {"name":"oostende","url":"https://siteB/wp-json/jackpot/v1/update","secret":"site-b-secret"},
+  {"name":"dinant","url":"https://siteC/wp-json/jackpot/v1/update"}
+]'
 ```
+
+- No `secret` on a site → the Worker signs with the shared `JACKPOT_SECRET`.
+- A site with its own `secret` → that site's `wp-config.php` must use the same value.
 
 ## Run / deploy
 
@@ -37,6 +48,6 @@ npm run tail     # live logs
 ## Contract
 
 - Accepts `POST` with header `x-listener-secret: <LISTENER_SECRET>`.
-- Body is any JSON; it is forwarded verbatim to each WordPress endpoint.
-- Adds header `x-signature: <hmac-sha256(JACKPOT_SECRET, body)>`.
+- Body is any JSON; it is forwarded verbatim to each WordPress site.
+- Adds header `x-signature: <hmac-sha256(site secret or JACKPOT_SECRET, body)>`.
 - Returns `200` if all sites succeeded, `207` if some failed (per-site detail in `results`).

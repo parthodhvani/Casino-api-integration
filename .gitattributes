@@ -1,0 +1,9 @@
+# Never apply text/EOL conversion to these binary types.
+# This prevents plugin .zip files from being corrupted on checkout/download
+# (which causes WordPress "No valid plugins were found" errors).
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
