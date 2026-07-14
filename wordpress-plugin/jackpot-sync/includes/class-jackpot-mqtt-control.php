@@ -193,20 +193,23 @@ class Jackpot_Sync_Mqtt_Control {
 
         if ($http_code === 502 || $http_code === 504) {
             $detail = is_array($data) && !empty($data['error']) ? $data['error'] : __('Node listener unavailable.', 'jackpot-sync');
+            $hint   = is_array($data) && !empty($data['hint']) ? ' ' . $data['hint'] : '';
+            $body   = is_array($data) && !empty($data['body']) ? ' Response: ' . $data['body'] : '';
             return self::fail(
                 'node_unavailable',
                 sprintf(
                     /* translators: %s: error detail */
                     __('Node listener error: %s', 'jackpot-sync'),
                     $detail
-                ),
+                ) . $hint . $body,
                 $http_code,
                 is_array($data) ? $data : []
             );
         }
 
         if ($http_code === 500 && is_array($data) && !empty($data['error'])) {
-            return self::fail('worker_error', (string) $data['error'], $http_code, $data);
+            $hint = !empty($data['hint']) ? ' ' . $data['hint'] : '';
+            return self::fail('worker_error', (string) $data['error'] . $hint, $http_code, $data);
         }
 
         if (!is_array($data)) {

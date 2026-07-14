@@ -94,3 +94,45 @@ Confirm `MQTT_TOPIC` matches the broker's topic. The heartbeat log shows
 
 The listener does not retry 4xx (bad payload/auth). Fix the `LISTENER_SECRET`
 or the payload; 5xx and network errors are retried with backoff.
+
+## MQTT Start / Stop from WordPress
+
+Admin buttons go: **WordPress → Worker → Node control API**.
+
+### "LISTENER_CONTROL_URL not configured"
+
+Set a plain-text variable on the Cloudflare Worker (Dashboard → Settings →
+Variables):
+
+```
+LISTENER_CONTROL_URL = https://YOUR-PUBLIC-HOST:3099
+```
+
+Must be reachable **from Cloudflare's network**. Do **not** use
+`http://127.0.0.1:3099` or `localhost` — that only works on the server itself.
+
+Also set secret `LISTENER_SECRET` (same value as in the Node `.env`).
+
+### "Node listener error: invalid response from listener"
+
+The Worker reached something, but the body was not JSON (often an HTML login
+page, cPanel error, or wrong URL). Verify from any machine:
+
+```bash
+curl -s -H "x-listener-secret: YOUR_SECRET" https://YOUR-PUBLIC-HOST:3099/status
+# → must return JSON like {"status":"Running","running":true,...}
+```
+
+If that returns HTML, fix the reverse proxy / firewall / URL until it returns JSON.
+
+### Status shows Running but Connection: error
+
+Usually a sticky transient MQTT error while messages still flow. Upgrade the
+listener (connection state clears when messages arrive). Check HiveMQ
+credentials / TLS if messages also stop.
+
+### Jackpots update but Start/Stop fails
+
+Fan-out (`POST /` to WordPress) and control (`/start|/stop|/status`) are
+separate paths. Fan-out only needs `WORKER_URL` + `LISTENER_SECRET` on the
+Node side. Control additionally needs a public `LISTENER_CONTROL_URL` on the Worker.
