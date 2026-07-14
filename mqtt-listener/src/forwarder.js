@@ -1,22 +1,17 @@
 /**
  * Forwards a normalized payload to the Cloudflare Worker with timeout + retry.
- * Requires Node.js 18+ (built-in fetch + AbortController).
+ * Compatible with Node.js 14+ (uses node-fetch + abort-controller).
  */
 
+'use strict';
+
 const logger = require('./logger');
+const http = require('./http');
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**
@@ -27,14 +22,14 @@ async function fetchWithTimeout(url, options, timeoutMs) {
  * @returns {Promise<boolean>} true when delivered (2xx)
  */
 async function forwardToWorker(payload, workerConfig) {
-  const retries = workerConfig.retries ?? 3;
-  const timeoutMs = workerConfig.timeoutMs ?? 8000;
-  const backoffMs = workerConfig.backoffMs ?? 500;
+  const retries = workerConfig.retries != null ? workerConfig.retries : 3;
+  const timeoutMs = workerConfig.timeoutMs != null ? workerConfig.timeoutMs : 8000;
+  const backoffMs = workerConfig.backoffMs != null ? workerConfig.backoffMs : 500;
   const body = JSON.stringify(payload);
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetchWithTimeout(
+      const res = await http.fetchWithTimeout(
         workerConfig.url,
         {
           method: 'POST',
@@ -42,26 +37,37 @@ async function forwardToWorker(payload, workerConfig) {
             'content-type': 'application/json',
             'x-listener-secret': workerConfig.listenerSecret,
           },
-          body,
+          body: body,
         },
         timeoutMs
       );
       const text = await res.text();
 
       if (res.ok) {
-        logger.info('forwarded to worker', { status: res.status, jpId: payload.jpId, attempts: attempt + 1 });
+        logger.info('forwarded to worker', {
+          status: res.status,
+          jpId: payload.jpId,
+          attempts: attempt + 1,
+        });
         return true;
       }
 
       // 4xx is definitive (bad payload / auth) — do not retry.
       if (res.status >= 400 && res.status < 500) {
-        logger.error('worker rejected payload', { status: res.status, body: text.slice(0, 200), jpId: payload.jpId });
+        logger.error('worker rejected payload', {
+          status: res.status,
+          body: text.slice(0, 200),
+          jpId: payload.jpId,
+        });
         return false;
       }
 
       logger.warn('worker error, will retry', { status: res.status, attempt: attempt + 1 });
     } catch (err) {
-      logger.warn('forward attempt failed', { error: err.message, attempt: attempt + 1 });
+      logger.warn('forward attempt failed', {
+        error: err && err.message ? err.message : String(err),
+        attempt: attempt + 1,
+      });
     }
 
     if (attempt < retries) {
@@ -69,7 +75,7 @@ async function forwardToWorker(payload, workerConfig) {
     }
   }
 
-  logger.error('forward failed after retries', { jpId: payload.jpId, retries });
+  logger.error('forward failed after retries', { jpId: payload.jpId, retries: retries });
   return false;
 }
 
@@ -81,10 +87,12 @@ async function forwardToWorker(payload, workerConfig) {
 async function pingHealthcheck(url) {
   if (!url) return;
   try {
-    await fetchWithTimeout(url, { method: 'GET' }, 5000);
+    await http.fetchWithTimeout(url, { method: 'GET' }, 5000);
   } catch (err) {
-    logger.warn('healthcheck ping failed', { error: err.message });
+    logger.warn('healthcheck ping failed', {
+      error: err && err.message ? err.message : String(err),
+    });
   }
 }
 
-module.exports = { forwardToWorker, pingHealthcheck };
+module.exports = { forwardToWorker: forwardToWorker, pingHealthcheck: pingHealthcheck };

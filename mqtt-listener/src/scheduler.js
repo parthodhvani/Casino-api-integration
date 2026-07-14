@@ -1,12 +1,9 @@
 /**
  * Daily MQTT connect / disconnect scheduler.
- *
- * Keeps the Node process alive; only toggles the MQTT connection via
- * startMQTT() / stopMQTT(). Default window: 06:00 → 08:00 local time.
- *
- * External cron / PM2 / systemd can also hit POST /start and POST /stop —
- * this built-in scheduler is optional (SCHEDULE_ENABLED=true by default).
+ * Compatible with Node.js 14+ (no Object.fromEntries dependency path issues).
  */
+
+'use strict';
 
 const logger = require('./logger');
 
@@ -14,26 +11,30 @@ const logger = require('./logger');
  * @param {object} options
  * @param {object} options.config
  * @param {object} options.mqttManager
- * @returns {{ stop: () => void }}
+ * @returns {{ stop: function(): void }}
  */
-function startScheduler({ config, mqttManager }) {
+function startScheduler(options) {
+  const config = options.config;
+  const mqttManager = options.mqttManager;
   const schedule = config.schedule;
   if (!schedule.enabled) {
     logger.info('scheduler disabled');
-    return { stop: () => {} };
+    return {
+      stop: function () {},
+    };
   }
 
   let lastStartKey = '';
   let lastStopKey = '';
   let timer = null;
 
-  const tick = async () => {
+  const tick = async function () {
     const now = zonedParts(new Date(), schedule.timezone);
-    const hm = `${pad(now.hour)}:${pad(now.minute)}`;
-    const dayKey = `${now.year}-${pad(now.month)}-${pad(now.day)}`;
+    const hm = pad(now.hour) + ':' + pad(now.minute);
+    const dayKey = now.year + '-' + pad(now.month) + '-' + pad(now.day);
 
     if (hm === schedule.startTime) {
-      const key = `${dayKey}-start`;
+      const key = dayKey + '-start';
       if (key !== lastStartKey) {
         lastStartKey = key;
         logger.info('scheduler start window', { time: hm, tz: schedule.timezone });
@@ -47,7 +48,7 @@ function startScheduler({ config, mqttManager }) {
     }
 
     if (hm === schedule.stopTime) {
-      const key = `${dayKey}-stop`;
+      const key = dayKey + '-stop';
       if (key !== lastStopKey) {
         lastStopKey = key;
         logger.info('scheduler stop window', { time: hm, tz: schedule.timezone });
@@ -61,12 +62,16 @@ function startScheduler({ config, mqttManager }) {
     }
   };
 
-  // Check every 20s so we don't miss the target minute.
-  timer = setInterval(tick, 20 * 1000);
+  timer = setInterval(function () {
+    tick().catch(function (err) {
+      logger.error('scheduler tick failed', { error: err.message });
+    });
+  }, 20 * 1000);
   if (typeof timer.unref === 'function') timer.unref();
 
-  // Run once immediately so a restart inside the window can catch up.
-  tick().catch((err) => logger.error('scheduler initial tick failed', { error: err.message }));
+  tick().catch(function (err) {
+    logger.error('scheduler initial tick failed', { error: err.message });
+  });
 
   logger.info('scheduler enabled', {
     start: schedule.startTime,
@@ -75,7 +80,7 @@ function startScheduler({ config, mqttManager }) {
   });
 
   return {
-    stop() {
+    stop: function () {
       if (timer) clearInterval(timer);
       timer = null;
     },
@@ -84,6 +89,7 @@ function startScheduler({ config, mqttManager }) {
 
 /**
  * Wall-clock parts in a specific IANA timezone.
+ * Uses formatToParts (available in Node 14 ICU builds).
  *
  * @param {Date} date
  * @param {string} timeZone
@@ -92,25 +98,34 @@ function startScheduler({ config, mqttManager }) {
 function zonedParts(date, timeZone) {
   try {
     const fmt = new Intl.DateTimeFormat('en-GB', {
-      timeZone,
+      timeZone: timeZone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      hourCycle: 'h23',
+      hour12: false,
     });
-    const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]));
+    const partsArr = fmt.formatToParts(date);
+    const parts = {};
+    for (let i = 0; i < partsArr.length; i++) {
+      parts[partsArr[i].type] = partsArr[i].value;
+    }
+    // Some Node 14 ICU builds return "24" for midnight — normalize to 0.
+    let hour = Number(parts.hour);
+    if (hour === 24) hour = 0;
     return {
       year: Number(parts.year),
       month: Number(parts.month),
       day: Number(parts.day),
-      hour: Number(parts.hour),
+      hour: hour,
       minute: Number(parts.minute),
     };
   } catch (err) {
-    // Fallback to local machine time if TZ is invalid.
-    logger.warn('invalid SCHEDULE_TZ, using local time', { timeZone, error: err.message });
+    logger.warn('invalid SCHEDULE_TZ, using local time', {
+      timeZone: timeZone,
+      error: err.message,
+    });
     return {
       year: date.getFullYear(),
       month: date.getMonth() + 1,
@@ -126,7 +141,8 @@ function zonedParts(date, timeZone) {
  * @returns {string}
  */
 function pad(n) {
-  return String(n).padStart(2, '0');
+  const s = String(n);
+  return s.length < 2 ? '0' + s : s;
 }
 
-module.exports = { startScheduler, zonedParts };
+module.exports = { startScheduler: startScheduler, zonedParts: zonedParts };

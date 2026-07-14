@@ -1,10 +1,9 @@
 /**
  * MQTT manager + control-server unit tests (no real broker).
- * Run with: npm test
+ * Compatible with Node 14 test runner.
  */
+'use strict';
 
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
 const http = require('http');
 const EventEmitter = require('events');
 
@@ -18,22 +17,23 @@ class FakeClient extends EventEmitter {
     this.subscribed = topics;
     if (cb) cb(null);
   }
-  end(force, opts, cb) {
+  end(force, optsOrCb, cb) {
     this.ended = true;
-    if (typeof opts === 'function') cb = opts;
-    setImmediate(() => {
-      this.emit('close');
-      if (cb) cb();
+    const callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
+    const self = this;
+    setImmediate(function () {
+      self.emit('close');
+      if (callback) callback();
     });
   }
 }
 
-test('startMQTT / stopMQTT / already_running / getStatus', async () => {
+test('startMQTT / stopMQTT / already_running / getStatus', async function () {
   delete require.cache[require.resolve('../src/mqtt-manager')];
   const mgr = require('../src/mqtt-manager');
 
   let fake = null;
-  mgr.setConnectFn(() => {
+  mgr.setConnectFn(function () {
     fake = new FakeClient();
     return fake;
   });
@@ -51,54 +51,58 @@ test('startMQTT / stopMQTT / already_running / getStatus', async () => {
     runtime: { healthcheckUrl: '' },
   };
 
-  assert.equal(mgr.isRunning(), false);
-  assert.equal(mgr.getStatus().status, 'Stopped');
+  assert.strictEqual(mgr.isRunning(), false);
+  assert.strictEqual(mgr.getStatus().status, 'Stopped');
 
   const started = await mgr.startMQTT(config);
-  assert.equal(started.status, 'started');
-  assert.equal(mgr.isRunning(), true);
+  assert.strictEqual(started.status, 'started');
+  assert.strictEqual(mgr.isRunning(), true);
   assert.ok(fake, 'fake client should be created');
 
   fake.emit('connect');
-  assert.deepEqual(fake.subscribed, ['/jp/gent']);
-  assert.equal(mgr.getStatus().connectionState, 'connected');
+  assert.deepStrictEqual(fake.subscribed, ['/jp/gent']);
+  assert.strictEqual(mgr.getStatus().connectionState, 'connected');
 
   const again = await mgr.startMQTT(config);
-  assert.equal(again.status, 'already_running');
+  assert.strictEqual(again.status, 'already_running');
 
   const stopped = await mgr.stopMQTT();
-  assert.equal(stopped.status, 'stopped');
-  assert.equal(mgr.isRunning(), false);
-  assert.equal(mgr.getStatus().status, 'Stopped');
-  assert.equal(fake.ended, true);
+  assert.strictEqual(stopped.status, 'stopped');
+  assert.strictEqual(mgr.isRunning(), false);
+  assert.strictEqual(mgr.getStatus().status, 'Stopped');
+  assert.strictEqual(fake.ended, true);
 
   const stoppedAgain = await mgr.stopMQTT();
-  assert.equal(stoppedAgain.status, 'already_stopped');
+  assert.strictEqual(stoppedAgain.status, 'already_stopped');
 
   mgr.setConnectFn(null);
 });
 
-test('control server auth + routes', async (t) => {
+test('control server auth + routes', async function () {
   delete require.cache[require.resolve('../src/control-server')];
   delete require.cache[require.resolve('../src/security')];
   const { createControlServer, listen } = require('../src/control-server');
 
   const calls = { start: 0, stop: 0 };
   const mqttManager = {
-    isRunning: () => false,
-    getStatus: () => ({
-      status: 'Stopped',
-      running: false,
-      connectionState: 'stopped',
-      lastSyncTime: null,
-      lastMessageAt: null,
-      lastConfigUpdate: null,
-    }),
-    startMQTT: async () => {
+    isRunning: function () {
+      return false;
+    },
+    getStatus: function () {
+      return {
+        status: 'Stopped',
+        running: false,
+        connectionState: 'stopped',
+        lastSyncTime: null,
+        lastMessageAt: null,
+        lastConfigUpdate: null,
+      };
+    },
+    startMQTT: async function () {
       calls.start++;
       return { status: 'started' };
     },
-    stopMQTT: async () => {
+    stopMQTT: async function () {
       calls.stop++;
       return { status: 'stopped' };
     },
@@ -108,20 +112,21 @@ test('control server auth + routes', async (t) => {
     control: { listenerSecret: 'test-secret' },
   };
 
-  const server = createControlServer({ config, mqttManager });
+  const server = createControlServer({ config: config, mqttManager: mqttManager });
   await listen(server, { host: '127.0.0.1', port: 0 });
-  const { port } = server.address();
+  const port = server.address().port;
 
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-
-  const request = (method, path, headers = {}) =>
-    new Promise((resolve, reject) => {
+  function request(method, reqPath, headers) {
+    headers = headers || {};
+    return new Promise(function (resolve, reject) {
       const req = http.request(
-        { hostname: '127.0.0.1', port, path, method, headers },
-        (res) => {
+        { hostname: '127.0.0.1', port: port, path: reqPath, method: method, headers: headers },
+        function (res) {
           let body = '';
-          res.on('data', (c) => (body += c));
-          res.on('end', () => {
+          res.on('data', function (c) {
+            body += c;
+          });
+          res.on('end', function () {
             resolve({ status: res.statusCode, body: JSON.parse(body || '{}') });
           });
         }
@@ -129,42 +134,49 @@ test('control server auth + routes', async (t) => {
       req.on('error', reject);
       req.end();
     });
+  }
 
-  const health = await request('GET', '/health');
-  assert.equal(health.status, 200);
-  assert.equal(health.body.ok, true);
+  try {
+    const health = await request('GET', '/health');
+    assert.strictEqual(health.status, 200);
+    assert.strictEqual(health.body.ok, true);
 
-  const unauth = await request('POST', '/start');
-  assert.equal(unauth.status, 401);
+    const unauth = await request('POST', '/start');
+    assert.strictEqual(unauth.status, 401);
 
-  const start = await request('POST', '/start', { 'x-listener-secret': 'test-secret' });
-  assert.equal(start.status, 200);
-  assert.equal(start.body.status, 'started');
-  assert.equal(calls.start, 1);
+    const start = await request('POST', '/start', { 'x-listener-secret': 'test-secret' });
+    assert.strictEqual(start.status, 200);
+    assert.strictEqual(start.body.status, 'started');
+    assert.strictEqual(calls.start, 1);
 
-  const status = await request('GET', '/status', { 'x-listener-secret': 'test-secret' });
-  assert.equal(status.status, 200);
-  assert.equal(status.body.status, 'Stopped');
+    const status = await request('GET', '/status', { 'x-listener-secret': 'test-secret' });
+    assert.strictEqual(status.status, 200);
+    assert.strictEqual(status.body.status, 'Stopped');
 
-  const stop = await request('POST', '/stop', { 'x-listener-secret': 'test-secret' });
-  assert.equal(stop.status, 200);
-  assert.equal(stop.body.status, 'stopped');
-  assert.equal(calls.stop, 1);
+    const stop = await request('POST', '/stop', { 'x-listener-secret': 'test-secret' });
+    assert.strictEqual(stop.status, 200);
+    assert.strictEqual(stop.body.status, 'stopped');
+    assert.strictEqual(calls.stop, 1);
+  } finally {
+    await new Promise(function (resolve) {
+      server.close(resolve);
+    });
+  }
 });
 
-test('timingSafeEqualString', () => {
+test('timingSafeEqualString', function () {
   const { timingSafeEqualString } = require('../src/security');
-  assert.equal(timingSafeEqualString('abc', 'abc'), true);
-  assert.equal(timingSafeEqualString('abc', 'abd'), false);
-  assert.equal(timingSafeEqualString('abc', 'abcd'), false);
+  assert.strictEqual(timingSafeEqualString('abc', 'abc'), true);
+  assert.strictEqual(timingSafeEqualString('abc', 'abd'), false);
+  assert.strictEqual(timingSafeEqualString('abc', 'abcd'), false);
 });
 
-test('zonedParts returns consistent shape', () => {
+test('zonedParts returns consistent shape', function () {
   const { zonedParts } = require('../src/scheduler');
   const parts = zonedParts(new Date('2026-07-14T04:00:00.000Z'), 'UTC');
-  assert.equal(parts.year, 2026);
-  assert.equal(parts.month, 7);
-  assert.equal(parts.day, 14);
-  assert.equal(parts.hour, 4);
-  assert.equal(parts.minute, 0);
+  assert.strictEqual(parts.year, 2026);
+  assert.strictEqual(parts.month, 7);
+  assert.strictEqual(parts.day, 14);
+  assert.strictEqual(parts.hour, 4);
+  assert.strictEqual(parts.minute, 0);
 });

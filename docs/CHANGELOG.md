@@ -5,6 +5,13 @@ semantic-ish versioning aligned with the plugin version.
 
 ## [3.1.1] — 2026-07-14
 
+### MQTT listener
+
+**Changed**
+- Compatible with **Node.js 14** (cPanel): `node-fetch@2`, `abort-controller`, `mqtt@4`.
+- `engines.node` set to `>=14`; tests use a Node-14-safe runner (`test/run-tests.js`).
+- Worker + WordPress contracts unchanged (`x-listener-secret`, JSON fan-out, `/start|/stop|/status`).
+
 ### Cloudflare Worker
 
 **Changed**
