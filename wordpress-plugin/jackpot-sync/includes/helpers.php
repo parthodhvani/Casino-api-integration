@@ -1,75 +1,82 @@
 <?php
 /**
- * Shared helpers: settings access + activity logging.
+ * Backward-compatibility helper shim.
+ *
+ * The plugin was refactored into service classes in v3.0.0. These thin wrapper
+ * functions preserve the public procedural API used by earlier versions (and
+ * any site snippets that may call them) by delegating to the new services.
+ *
+ * @package JackpotSync
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-/**
- * Default settings. These are what a fresh install starts with.
- */
-function jackpot_default_settings() {
-    return [
-        'secret'       => '',
-        'cpt'          => 'jackpot',
-        'field_amount' => 'jackpot_amount',
-        'field_shared' => 'shared_profit_amount',
-        'divisor'      => 1,   // 1 = values are whole euros, 100 = values are cents
-        'max_keep'     => 20,
-    ];
-}
-
-/**
- * Read a single setting.
- *
- * The shared secret can also be defined in wp-config.php as JACKPOT_SECRET,
- * which always takes priority over the value saved on the settings page.
- */
-function jackpot_get($key) {
-    if ($key === 'secret' && defined('JACKPOT_SECRET') && JACKPOT_SECRET !== '') {
-        return JACKPOT_SECRET;
+if (!function_exists('jackpot_default_settings')) {
+    /**
+     * @return array<string,mixed>
+     */
+    function jackpot_default_settings() {
+        return Jackpot_Sync_Settings::defaults();
     }
-
-    $settings = wp_parse_args(
-        get_option('jackpot_sync_settings', []),
-        jackpot_default_settings()
-    );
-
-    return isset($settings[$key]) ? $settings[$key] : null;
 }
 
-/**
- * The public REST endpoint URL for this site.
- */
-function jackpot_endpoint_url() {
-    return rest_url('jackpot/v1/update');
-}
-
-function jackpot_ping_url() {
-    return rest_url('jackpot/v1/ping');
-}
-
-/**
- * Append a line to the in-dashboard activity log (keeps the newest 50).
- * Also writes to the PHP error log when WP_DEBUG is on.
- */
-function jackpot_log($message) {
-    $log = get_option('jackpot_sync_log', []);
-    if (!is_array($log)) {
-        $log = [];
+if (!function_exists('jackpot_get')) {
+    /**
+     * @param string $key Setting key.
+     * @return mixed|null
+     */
+    function jackpot_get($key) {
+        return Jackpot_Sync_Settings::get($key);
     }
+}
 
-    array_unshift($log, [
-        'time' => current_time('mysql'),
-        'msg'  => (string) $message,
-    ]);
+if (!function_exists('jackpot_endpoint_url')) {
+    /**
+     * @return string
+     */
+    function jackpot_endpoint_url() {
+        return Jackpot_Sync_Settings::endpoint_url();
+    }
+}
 
-    $log = array_slice($log, 0, 50);
-    update_option('jackpot_sync_log', $log, false);
+if (!function_exists('jackpot_ping_url')) {
+    /**
+     * @return string
+     */
+    function jackpot_ping_url() {
+        return Jackpot_Sync_Settings::ping_url();
+    }
+}
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('[jackpot-sync] ' . $message);
+if (!function_exists('jackpot_log')) {
+    /**
+     * @param string              $message Message.
+     * @param array<string,mixed> $context Context.
+     * @return void
+     */
+    function jackpot_log($message, array $context = []) {
+        Jackpot_Sync_Logger::log($message, $context);
+    }
+}
+
+if (!function_exists('jackpot_purge_cache')) {
+    /**
+     * @param int $post_id Post ID.
+     * @return void
+     */
+    function jackpot_purge_cache($post_id) {
+        Jackpot_Sync_Plugin::instance()->cache()->purge($post_id);
+    }
+}
+
+if (!function_exists('jackpot_find_post_by_jpid')) {
+    /**
+     * @param string $jp_id Jackpot ID.
+     * @return int
+     */
+    function jackpot_find_post_by_jpid($jp_id) {
+        return Jackpot_Sync_Plugin::instance()->repository()->find_by_jpid($jp_id);
     }
 }

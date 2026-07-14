@@ -1,54 +1,94 @@
 /**
  * MQTT Listener — entry point.
  *
- * Holds a persistent MQTT connection to HiveMQ, parses each DRGT message,
- * and forwards a normalized JSON payload to the Cloudflare Worker.
+ * Starts an HTTP control API and (optionally) a daily scheduler. The MQTT
+ * connection is NOT opened on boot unless MQTT_AUTO_START=true. Connect via
+ * startMQTT() — from POST /start, the built-in schedule, or external cron.
+ *
+ * Features: controllable MQTT, auto-reconnect while running, heartbeat,
+ * forward retry, graceful process shutdown (SIGINT/SIGTERM).
  *
  * Testing:    run on your laptop (`npm start`).
  * Production: run on an always-on host (Render/Fly/VPS) with the same env vars.
  */
 
-const mqtt = require('mqtt');
 const config = require('./config');
-const { parseMessage } = require('./parser');
-const { forwardToWorker } = require('./forwarder');
+const logger = require('./logger');
+const mqttManager = require('./mqtt-manager');
+const { createControlServer, listen } = require('./control-server');
+const { startScheduler } = require('./scheduler');
 
-const client = mqtt.connect(config.mqtt.brokerUrl, {
-  username: config.mqtt.username,
-  password: config.mqtt.password,
-  reconnectPeriod: 5000, // auto-reconnect every 5s on drop
-  connectTimeout: 30000,
-});
-
-client.on('connect', () => {
-  console.log(`[mqtt] connected to ${config.mqtt.brokerUrl}`);
-  client.subscribe(config.mqtt.topic, (err) => {
-    if (err) {
-      console.error('[mqtt] subscribe error:', err.message);
-    } else {
-      console.log(`[mqtt] subscribed to ${config.mqtt.topic}`);
-    }
+async function main() {
+  const server = createControlServer({ config, mqttManager });
+  await listen(server, { host: config.control.host, port: config.control.port });
+  logger.info('control server listening', {
+    host: config.control.host,
+    port: config.control.port,
+    endpoints: ['POST /start', 'POST /stop', 'GET /status', 'GET /health'],
   });
-});
 
-client.on('reconnect', () => console.log('[mqtt] reconnecting...'));
-client.on('close', () => console.log('[mqtt] connection closed'));
-client.on('error', (err) => console.error('[mqtt] error:', err.message));
+  const scheduler = startScheduler({ config, mqttManager });
 
-client.on('message', async (topic, message) => {
-  const raw = message.toString();
-  console.log(`[msg] ${topic} => ${raw}`);
-
-  const payload = parseMessage(raw);
-  if (!payload) {
-    console.log('[msg] skipped (unknown or malformed)');
-    return;
+  // Heartbeat — periodic status so silent feeds are visible in logs/monitoring.
+  const heartbeat = setInterval(() => {
+    const status = mqttManager.getStatus();
+    logger.info('heartbeat', {
+      running: status.running,
+      connectionState: status.connectionState,
+      messages: status.messages,
+      forwarded: status.forwarded,
+      failed: status.failed,
+      lastMessageAt: status.lastMessageAt,
+      lastSyncTime: status.lastSyncTime,
+    });
+  }, config.runtime.heartbeatMs);
+  if (typeof heartbeat.unref === 'function') {
+    heartbeat.unref();
   }
 
-  await forwardToWorker(payload, config.worker);
+  if (config.runtime.autoStart) {
+    logger.info('MQTT_AUTO_START enabled — connecting now');
+    await mqttManager.startMQTT(config);
+  } else {
+    logger.info('MQTT idle — waiting for /start or schedule', {
+      scheduleEnabled: config.schedule.enabled,
+      start: config.schedule.startTime,
+      stop: config.schedule.stopTime,
+      timezone: config.schedule.timezone,
+    });
+  }
+
+  // Graceful process shutdown for both Ctrl-C (SIGINT) and host stop (SIGTERM).
+  let shuttingDown = false;
+  async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('shutting down', { signal });
+    clearInterval(heartbeat);
+    scheduler.stop();
+    try {
+      await mqttManager.stopMQTT();
+    } catch (err) {
+      logger.warn('stopMQTT during shutdown failed', { error: err.message });
+    }
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+      setTimeout(resolve, 1000);
+    });
+    process.exit(0);
+  }
+
+  process.on('SIGINT', () => {
+    shutdown('SIGINT');
+  });
+  process.on('SIGTERM', () => {
+    shutdown('SIGTERM');
+  });
+}
+
+main().catch((err) => {
+  logger.error('fatal startup error', { error: err.message });
+  process.exit(1);
 });
 
-process.on('SIGINT', () => {
-  console.log('\n[shutdown] closing MQTT connection...');
-  client.end(true, () => process.exit(0));
-});
+module.exports = { mqttManager };

@@ -1,0 +1,50 @@
+/* Jackpot Sync — Settings → MQTT Listener panel */
+
+.jackpot-sync-wrap .jackpot-mqtt-panel {
+  margin: 0 0 1.5em;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  background: #9ca3af;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-indicator.is-running .jackpot-mqtt-dot {
+  background: #1a7f37;
+  box-shadow: 0 0 0 3px rgba(26, 127, 55, 0.15);
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-indicator.is-stopped .jackpot-mqtt-dot {
+  background: #b32d2e;
+  box-shadow: 0 0 0 3px rgba(179, 45, 46, 0.12);
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-indicator.is-running {
+  color: #1a7f37;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-indicator.is-stopped {
+  color: #b32d2e;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-actions .button {
+  margin-right: 6px;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-notice {
+  max-width: 820px;
+  margin: 12px 0;
+}
+
+.jackpot-sync-wrap .jackpot-mqtt-notice[hidden] {
+  display: none !important;
+}

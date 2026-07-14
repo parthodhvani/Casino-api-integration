@@ -1,18 +1,18 @@
 {
   "name": "jackpot-mqtt-listener",
-  "version": "1.0.0",
+  "version": "3.1.0",
   "private": true,
-  "description": "Persistent MQTT listener that forwards DRGT jackpot messages to the Cloudflare Worker.",
+  "description": "Controllable MQTT listener that forwards DRGT jackpot messages to the Cloudflare Worker.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/parser.test.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "mqtt": "^5.5.0"
+    "dotenv": "^16.4.7",
+    "mqtt": "^5.10.1"
   }
 }
