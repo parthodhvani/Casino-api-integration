@@ -1,43 +1,33 @@
 /**
  * MQTT connection manager.
+ * Compatible with Node.js 14+ and mqtt@4.
  *
  * Owns the single MQTT client for this process. Connect only via startMQTT();
  * disconnect via stopMQTT(). The Node process itself is never terminated here.
- *
- * Guarantees:
- *   - At most one active MQTT client / subscription set.
- *   - Safe reconnect while "running"; no reconnect after an intentional stop.
- *   - Status fields for the control API and admin UI.
  */
+
+'use strict';
 
 const mqtt = require('mqtt');
 const logger = require('./logger');
 const { parseMessage } = require('./parser');
 const { forwardToWorker, pingHealthcheck } = require('./forwarder');
 
-/** @type {import('mqtt').MqttClient|null} */
 let client = null;
-
-/** True while the manager intends to keep a connection (even during reconnect). */
 let running = false;
-
-/** True while startMQTT()/stopMQTT() is in flight (serialize control calls). */
 let transitioning = false;
-
-/** Injectable for unit tests (defaults to mqtt.connect). */
 let connectFn = mqtt.connect;
 
 /**
  * Override the MQTT connect function (tests only).
- *
- * @param {Function} fn
+ * @param {Function|null} fn
  */
 function setConnectFn(fn) {
   connectFn = typeof fn === 'function' ? fn : mqtt.connect;
 }
 
 const state = {
-  connectionState: 'stopped', // stopped | connecting | connected | reconnecting | offline | error
+  connectionState: 'stopped',
   messages: 0,
   forwarded: 0,
   failed: 0,
@@ -50,22 +40,14 @@ const state = {
   stoppedAt: null,
 };
 
-/**
- * @returns {boolean}
- */
 function isRunning() {
   return running;
 }
 
-/**
- * Snapshot used by GET /status and the WordPress admin UI.
- *
- * @returns {object}
- */
 function getStatus() {
   return {
     status: running ? 'Running' : 'Stopped',
-    running,
+    running: running,
     connectionState: state.connectionState,
     lastSyncTime: state.lastSyncTime,
     lastMessageAt: state.lastMessageAt,
@@ -81,15 +63,12 @@ function getStatus() {
 }
 
 /**
- * Attach event handlers once per client instance.
- *
- * @param {import('mqtt').MqttClient} c
+ * @param {object} c mqtt client
  * @param {object} config
  */
 function attachHandlers(c, config) {
-  c.on('connect', () => {
+  c.on('connect', function () {
     if (!running) {
-      // Intentional stop raced a connect — drop immediately.
       c.end(true);
       return;
     }
@@ -97,7 +76,7 @@ function attachHandlers(c, config) {
     state.lastError = null;
     logger.info('mqtt connected', { broker: config.mqtt.brokerUrl });
 
-    c.subscribe(config.mqtt.topics, (err) => {
+    c.subscribe(config.mqtt.topics, function (err) {
       if (err) {
         state.connectionState = 'error';
         state.lastError = err.message;
@@ -108,44 +87,44 @@ function attachHandlers(c, config) {
     });
   });
 
-  c.on('reconnect', () => {
+  c.on('reconnect', function () {
     if (!running) return;
     state.connectionState = 'reconnecting';
     logger.warn('mqtt reconnecting');
   });
 
-  c.on('close', () => {
+  c.on('close', function () {
     if (running) {
       state.connectionState = 'offline';
       logger.warn('mqtt connection closed');
     }
   });
 
-  c.on('offline', () => {
+  c.on('offline', function () {
     if (running) {
       state.connectionState = 'offline';
       logger.warn('mqtt offline');
     }
   });
 
-  c.on('error', (err) => {
+  c.on('error', function (err) {
     state.lastError = err.message;
     state.connectionState = 'error';
     logger.error('mqtt error', { error: err.message });
   });
 
-  c.on('message', async (topic, message) => {
+  c.on('message', async function (topic, message) {
     if (!running) return;
 
     const raw = message.toString();
     state.messages++;
     state.lastMessageAt = new Date().toISOString();
-    state.lastRawMessage = raw.length > 500 ? raw.slice(0, 500) + '…' : raw;
-    logger.info('message received', { topic, raw });
+    state.lastRawMessage = raw.length > 500 ? raw.slice(0, 500) + '...' : raw;
+    logger.info('message received', { topic: topic, raw: raw });
 
     const payload = parseMessage(raw);
     if (!payload) {
-      logger.warn('message skipped (unknown or malformed)', { topic, raw });
+      logger.warn('message skipped (unknown or malformed)', { topic: topic, raw: raw });
       return;
     }
 
@@ -165,10 +144,7 @@ function attachHandlers(c, config) {
 }
 
 /**
- * Connect to the broker and subscribe. Idempotent: if already running,
- * returns { status: 'already_running' } without opening a second connection.
- *
- * @param {object} config App config from ./config
+ * @param {object} config
  * @returns {Promise<{status:string, connectionState?:string}>}
  */
 async function startMQTT(config) {
@@ -182,7 +158,6 @@ async function startMQTT(config) {
 
   transitioning = true;
   try {
-    // Defensive: tear down any leftover client before creating a new one.
     if (client) {
       await endClient(true);
     }
@@ -210,8 +185,6 @@ async function startMQTT(config) {
 }
 
 /**
- * Gracefully disconnect MQTT. Does not exit the Node process.
- *
  * @returns {Promise<{status:string}>}
  */
 async function stopMQTT() {
@@ -237,13 +210,14 @@ async function stopMQTT() {
 }
 
 /**
- * End the current client and clear the reference.
+ * mqtt@4: end([force], [callback]) or end([force], [options], [callback])
+ * Support both mqtt@4 and mqtt@5 callback shapes.
  *
  * @param {boolean} force
  * @returns {Promise<void>}
  */
 function endClient(force) {
-  return new Promise((resolve) => {
+  return new Promise(function (resolve) {
     if (!client) {
       resolve();
       return;
@@ -252,7 +226,6 @@ function endClient(force) {
     const c = client;
     client = null;
 
-    // Prevent reconnect / close noise after an intentional stop.
     c.removeAllListeners('message');
     c.removeAllListeners('connect');
     c.removeAllListeners('reconnect');
@@ -261,14 +234,19 @@ function endClient(force) {
     c.removeAllListeners('error');
 
     let done = false;
-    const finish = () => {
+    const finish = function () {
       if (done) return;
       done = true;
       resolve();
     };
 
     try {
-      c.end(force, {}, finish);
+      // mqtt v4 accepts (force, cb). mqtt v5 accepts (force, opts, cb).
+      if (c.end.length >= 3) {
+        c.end(force, {}, finish);
+      } else {
+        c.end(force, finish);
+      }
     } catch (err) {
       logger.warn('mqtt end error', { error: err.message });
       finish();
@@ -278,12 +256,13 @@ function endClient(force) {
 }
 
 module.exports = {
-  startMQTT,
-  stopMQTT,
-  isRunning,
-  getStatus,
-  setConnectFn,
-  // Exposed for tests / shutdown hooks.
+  startMQTT: startMQTT,
+  stopMQTT: stopMQTT,
+  isRunning: isRunning,
+  getStatus: getStatus,
+  setConnectFn: setConnectFn,
   _state: state,
-  _getClient: () => client,
+  _getClient: function () {
+    return client;
+  },
 };

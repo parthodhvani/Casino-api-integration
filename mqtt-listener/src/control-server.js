@@ -1,5 +1,6 @@
 /**
  * HTTP control server for MQTT start / stop / status.
+ * Compatible with Node.js 14+ (uses url.parse when URL global quirks appear).
  *
  * Endpoints (all require x-listener-secret):
  *   POST /start  → startMQTT()
@@ -8,67 +9,86 @@
  *   GET  /health → liveness (no auth; process is up)
  */
 
+'use strict';
+
 const http = require('http');
+const { URL } = require('url');
 const { timingSafeEqualString } = require('./security');
 const logger = require('./logger');
 
 /**
  * @param {object} options
  * @param {object} options.config
- * @param {object} options.mqttManager  { startMQTT, stopMQTT, getStatus }
+ * @param {object} options.mqttManager
  * @returns {http.Server}
  */
-function createControlServer({ config, mqttManager }) {
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const path = url.pathname.replace(/\/+$/, '') || '/';
-    const method = (req.method || 'GET').toUpperCase();
+function createControlServer(options) {
+  const config = options.config;
+  const mqttManager = options.mqttManager;
 
-    // Liveness probe — no secret (used by load balancers / systemd).
-    if (method === 'GET' && (path === '/health' || path === '/')) {
-      return sendJson(res, 200, {
-        ok: true,
-        service: 'jackpot-mqtt-listener',
-        version: '3.1.0',
-        mqtt: mqttManager.isRunning() ? 'Running' : 'Stopped',
+  const server = http.createServer(function (req, res) {
+    // Wrap async work so Node 14 server callback stays sync-safe.
+    handleRequest(req, res, config, mqttManager).catch(function (err) {
+      logger.error('control handler error', {
+        error: err && err.message ? err.message : String(err),
       });
-    }
-
-    if (!authenticate(req, config.control.listenerSecret)) {
-      logger.warn('control unauthorized', { path, method });
-      return sendJson(res, 401, { error: 'unauthorized' });
-    }
-
-    try {
-      if (method === 'POST' && path === '/start') {
-        const result = await mqttManager.startMQTT(config);
-        const code = result.status === 'already_running' ? 200 : result.status === 'busy' ? 409 : 200;
-        return sendJson(res, code, result);
+      if (!res.headersSent) {
+        sendJson(res, 500, { error: 'internal error', message: String(err && err.message) });
       }
-
-      if (method === 'POST' && path === '/stop') {
-        const result = await mqttManager.stopMQTT();
-        const code = result.status === 'busy' ? 409 : 200;
-        return sendJson(res, code, result);
-      }
-
-      if (method === 'GET' && path === '/status') {
-        return sendJson(res, 200, mqttManager.getStatus());
-      }
-
-      return sendJson(res, 404, { error: 'not found' });
-    } catch (err) {
-      logger.error('control handler error', { error: err.message, path, method });
-      return sendJson(res, 500, { error: 'internal error', message: err.message });
-    }
+    });
   });
 
   return server;
 }
 
 /**
- * Constant-time listener-secret check.
- *
+ * @param {http.IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {object} config
+ * @param {object} mqttManager
+ */
+async function handleRequest(req, res, config, mqttManager) {
+  const host = req.headers.host || 'localhost';
+  const url = new URL(req.url || '/', 'http://' + host);
+  let path = url.pathname.replace(/\/+$/, '');
+  if (!path) path = '/';
+  const method = (req.method || 'GET').toUpperCase();
+
+  if (method === 'GET' && (path === '/health' || path === '/')) {
+    return sendJson(res, 200, {
+      ok: true,
+      service: 'jackpot-mqtt-listener',
+      version: '3.1.1',
+      node: process.versions.node,
+      mqtt: mqttManager.isRunning() ? 'Running' : 'Stopped',
+    });
+  }
+
+  if (!authenticate(req, config.control.listenerSecret)) {
+    logger.warn('control unauthorized', { path: path, method: method });
+    return sendJson(res, 401, { error: 'unauthorized' });
+  }
+
+  if (method === 'POST' && path === '/start') {
+    const result = await mqttManager.startMQTT(config);
+    const code = result.status === 'busy' ? 409 : 200;
+    return sendJson(res, code, result);
+  }
+
+  if (method === 'POST' && path === '/stop') {
+    const result = await mqttManager.stopMQTT();
+    const code = result.status === 'busy' ? 409 : 200;
+    return sendJson(res, code, result);
+  }
+
+  if (method === 'GET' && path === '/status') {
+    return sendJson(res, 200, mqttManager.getStatus());
+  }
+
+  return sendJson(res, 404, { error: 'not found' });
+}
+
+/**
  * @param {http.IncomingMessage} req
  * @param {string} expected
  * @returns {boolean}
@@ -94,20 +114,18 @@ function sendJson(res, status, body) {
 }
 
 /**
- * Bind the control server.
- *
  * @param {http.Server} server
  * @param {{host:string,port:number}} bind
  * @returns {Promise<http.Server>}
  */
 function listen(server, bind) {
-  return new Promise((resolve, reject) => {
+  return new Promise(function (resolve, reject) {
     server.once('error', reject);
-    server.listen(bind.port, bind.host, () => {
+    server.listen(bind.port, bind.host, function () {
       server.removeListener('error', reject);
       resolve(server);
     });
   });
 }
 
-module.exports = { createControlServer, listen };
+module.exports = { createControlServer: createControlServer, listen: listen };

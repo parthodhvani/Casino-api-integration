@@ -1,8 +1,9 @@
 /**
- * Forwarder tests (stubbed fetch). Run with: npm test  (node --test)
+ * Forwarder tests (stubbed fetch). Compatible with Node 14 test runner.
  */
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
+'use strict';
+
+const httpMod = require('../src/http');
 const { forwardToWorker } = require('../src/forwarder');
 
 const payload = { type: 'JPUPDATE', jpId: 'O136' };
@@ -14,57 +15,75 @@ const baseConfig = {
   backoffMs: 1,
 };
 
-test('returns true on 2xx', async () => {
-  const original = globalThis.fetch;
-  globalThis.fetch = async () => new Response('{"ok":true}', { status: 200 });
-  try {
-    assert.equal(await forwardToWorker(payload, baseConfig), true);
-  } finally {
-    globalThis.fetch = original;
-  }
-});
+function fakeResponse(body, status) {
+  return {
+    ok: status >= 200 && status < 300,
+    status: status,
+    text: function () {
+      return Promise.resolve(body);
+    },
+  };
+}
 
-test('retries on 5xx then succeeds', async () => {
-  let calls = 0;
-  const original = globalThis.fetch;
-  globalThis.fetch = async () => {
-    calls++;
-    return calls < 3 ? new Response('e', { status: 502 }) : new Response('ok', { status: 200 });
+test('forwarder returns true on 2xx', async function () {
+  const original = httpMod.fetchWithTimeout;
+  httpMod.fetchWithTimeout = async function () {
+    return fakeResponse('{"ok":true}', 200);
   };
   try {
-    assert.equal(await forwardToWorker(payload, baseConfig), true);
-    assert.equal(calls, 3);
+    // Re-require forwarder won't pick up mutated export of fetchWithTimeout
+    // because forwarder already closed over require('./http'). Mutating the
+    // exported function on the same module object works.
+    assert.strictEqual(await forwardToWorker(payload, baseConfig), true);
   } finally {
-    globalThis.fetch = original;
+    httpMod.fetchWithTimeout = original;
   }
 });
 
-test('does not retry on 4xx', async () => {
+test('forwarder retries on 5xx then succeeds', async function () {
   let calls = 0;
-  const original = globalThis.fetch;
-  globalThis.fetch = async () => {
+  const original = httpMod.fetchWithTimeout;
+  httpMod.fetchWithTimeout = async function () {
     calls++;
-    return new Response('bad', { status: 401 });
+    return calls < 3 ? fakeResponse('e', 502) : fakeResponse('ok', 200);
   };
   try {
-    assert.equal(await forwardToWorker(payload, baseConfig), false);
-    assert.equal(calls, 1);
+    assert.strictEqual(await forwardToWorker(payload, baseConfig), true);
+    assert.strictEqual(calls, 3);
   } finally {
-    globalThis.fetch = original;
+    httpMod.fetchWithTimeout = original;
   }
 });
 
-test('gives up after retries on persistent error', async () => {
+test('forwarder does not retry on 4xx', async function () {
   let calls = 0;
-  const original = globalThis.fetch;
-  globalThis.fetch = async () => {
+  const original = httpMod.fetchWithTimeout;
+  httpMod.fetchWithTimeout = async function () {
+    calls++;
+    return fakeResponse('bad', 401);
+  };
+  try {
+    assert.strictEqual(await forwardToWorker(payload, baseConfig), false);
+    assert.strictEqual(calls, 1);
+  } finally {
+    httpMod.fetchWithTimeout = original;
+  }
+});
+
+test('forwarder gives up after retries on persistent error', async function () {
+  let calls = 0;
+  const original = httpMod.fetchWithTimeout;
+  httpMod.fetchWithTimeout = async function () {
     calls++;
     throw new Error('network down');
   };
   try {
-    assert.equal(await forwardToWorker(payload, { ...baseConfig, retries: 2 }), false);
-    assert.equal(calls, 3);
+    assert.strictEqual(
+      await forwardToWorker(payload, Object.assign({}, baseConfig, { retries: 2 })),
+      false
+    );
+    assert.strictEqual(calls, 3);
   } finally {
-    globalThis.fetch = original;
+    httpMod.fetchWithTimeout = original;
   }
 });

@@ -1,53 +1,48 @@
-# MQTT Listener (Node + HiveMQ)
+# MQTT Listener (Node 14+ / cPanel)
 
 Holds the MQTT connection to HiveMQ (when started), parses DRGT messages, and
 forwards normalized JSON to the Cloudflare Worker.
 
-The Node **process** stays running. MQTT connect/disconnect is controlled via
-HTTP (`POST /start`, `POST /stop`, `GET /status`) or the built-in daily schedule
-(06:00–08:00).
-
-- **Testing:** run on your laptop (free).
-- **Production:** run on an always-on host with port `3099` reachable from Cloudflare.
-
-## Structure
+**Compatible with Node.js 14** (cPanel default). Also runs on 16/18/20.
 
 ```
-src/
-  index.js           entry (control server + scheduler; MQTT idle until /start)
-  mqtt-manager.js    startMQTT / stopMQTT / isRunning / getStatus
-  control-server.js  HTTP control API
-  scheduler.js       daily 06:00 / 08:00 window
-  security.js        constant-time secret compare
-  config.js          env var loading + validation
-  parser.js          DRGT message parsing (JPCONFIG / JPUPDATE)
-  forwarder.js       sends normalized JSON to the Worker (retry + timeout)
-  logger.js          structured single-line JSON logging
-test/
-  parser.test.js
-  forwarder.test.js
-  mqtt-control.test.js
+MQTT Broker → mqtt-listener (this app) → Cloudflare Worker → WordPress plugin
 ```
 
-## Setup
+Control API and message contract are unchanged — works with the existing
+Worker (`worker.js`) and WordPress Jackpot Sync plugin.
+
+## Requirements
+
+- **Node.js >= 14**
+- Outbound HTTPS to your Worker URL
+- Outbound MQTTS to HiveMQ (port 8883)
+- Open inbound TCP for the control port (default `3099`) if the Worker proxies `/start|/stop|/status`
+
+## Setup (cPanel)
 
 ```bash
 cd mqtt-listener
+# Select Node 14 in cPanel → Setup Node.js App (or nvm use 14)
 npm install
 cp .env.example .env
-# edit .env with your values
+# edit .env — set WORKER_URL + LISTENER_SECRET to match the Worker
+npm start
 ```
 
-Requires **Node.js 18+** (uses the built-in `fetch`).
+## Environment
 
-## Run
+Same as before. Critical values that must match the Worker / plugin:
 
-```bash
-npm start     # start process + control API (MQTT idle by default)
-npm test      # unit tests (no network needed)
-```
+| Env | Must match |
+|-----|------------|
+| `WORKER_URL` | Your Cloudflare Worker URL |
+| `LISTENER_SECRET` | Worker secret `LISTENER_SECRET` |
+| MQTT_* | HiveMQ broker credentials |
 
-Control examples:
+Optional schedule / control: see `.env.example`.
+
+## Control API
 
 ```bash
 curl -X POST -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/start
@@ -55,20 +50,33 @@ curl -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/status
 curl -X POST -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/stop
 ```
 
-You should see:
+## Node 14 changes (vs previous 18+)
 
-```json
-{"level":"info","ts":"...","message":"control server listening","port":3099}
-{"level":"info","ts":"...","message":"mqtt start requested","broker":"mqtts://...:8883"}
-{"level":"info","ts":"...","message":"mqtt connected","broker":"mqtts://...:8883"}
-{"level":"info","ts":"...","message":"mqtt subscribed","topics":["/jp/gent"]}
+| Before (Node 18+) | Now (Node 14+) |
+|-------------------|----------------|
+| Built-in `fetch` | `node-fetch@2` |
+| Built-in `AbortController` | `abort-controller` |
+| `mqtt@5` | `mqtt@4` |
+| `node --test` | `node test/run-tests.js` |
+
+Worker + WordPress contracts are identical (headers, JSON body, HMAC path via Worker).
+
+## Test
+
+```bash
+npm test
 ```
 
-Scheduling (cron / PM2 / systemd): see [`docs/SCHEDULING.md`](../docs/SCHEDULING.md).
+## Structure
 
-## Deploy notes
-
-The control port must be reachable from the Cloudflare Worker
-(`LISTENER_CONTROL_URL`). Use a Web Service / VPS with an open port — a
-Render “Background Worker” without HTTP ingress cannot receive `/start` from
-the Worker (built-in schedule still works on that host).
+```
+src/
+  index.js           entry
+  mqtt-manager.js    startMQTT / stopMQTT / getStatus
+  control-server.js  HTTP /start /stop /status
+  scheduler.js       daily 06:00 / 08:00
+  forwarder.js       POST to Cloudflare Worker
+  http.js            fetch + AbortController (Node 14 polyfills)
+  parser.js          JPCONFIG / JPUPDATE
+  config.js / logger.js / security.js
+```
