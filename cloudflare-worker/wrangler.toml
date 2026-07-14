@@ -17,6 +17,13 @@ WP_SITES = '[{"name":"berck","url":"https://casinoberck.fr/wp-json/jackpot/v1/up
 FORWARD_RETRIES = "2"
 FORWARD_TIMEOUT_MS = "8000"
 
+# Base URL of the Node MQTT listener control API (no trailing slash).
+# Example: https://listener.example.com:3099  or  http://10.0.0.5:3099
+LISTENER_CONTROL_URL = "http://127.0.0.1:3099"
+
+# Optional control proxy timeout (ms)
+CONTROL_TIMEOUT_MS = "8000"
+
 # Secrets are NOT stored here. Set them with:
 #   wrangler secret put LISTENER_SECRET
 #   wrangler secret put JACKPOT_SECRET

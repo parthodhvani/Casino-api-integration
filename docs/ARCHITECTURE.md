@@ -13,6 +13,21 @@ Cloudflare Worker sit in between.
                                                         Jackpot CPT → ACF → Elementor
 ```
 
+### MQTT control plane (v3.1)
+
+```
+[WP Admin buttons / Cron / Schedule]
+              │  AJAX or HTTPS
+              ▼
+     [Cloudflare Worker]   POST /start  POST /stop  GET /status
+              │  (auth: LISTENER_SECRET or HMAC JACKPOT_SECRET)
+              ▼
+     [Node Listener HTTP]  POST /start  POST /stop  GET /status
+              │
+              ▼
+     startMQTT() / stopMQTT()   ← single MQTT client, process stays alive
+```
+
 ## Why a listener AND a Worker?
 
 A Cloudflare Worker is event-driven and cannot hold a permanent MQTT connection
@@ -20,34 +35,43 @@ open. The small Node listener keeps the MQTT session alive; the Worker does the
 authentication, validation, signing and fan-out to the sites. This split also
 means the signing secret never lives on the always-on listener host.
 
+Control requests (start/stop/status) reverse the usual direction: WordPress or
+cron talks to the Worker, which proxies to the listener's HTTP control API.
+
 ## Components
 
 ### 1. MQTT Listener (`mqtt-listener/`)
 
 | File | Responsibility |
 |------|----------------|
-| `src/index.js` | Wires the MQTT connection, heartbeat, and graceful shutdown. |
-| `src/config.js` | Loads + validates env vars (multi-topic, tuning knobs). |
+| `src/index.js` | Boots control server + optional scheduler; does not connect MQTT on start. |
+| `src/mqtt-manager.js` | `startMQTT` / `stopMQTT` / `isRunning` / `getStatus` — one client only. |
+| `src/control-server.js` | HTTP `POST /start`, `POST /stop`, `GET /status`, `GET /health`. |
+| `src/scheduler.js` | Daily 06:00 connect / 08:00 disconnect (configurable). |
+| `src/security.js` | Constant-time secret compare. |
+| `src/config.js` | Loads + validates env vars (multi-topic, control, schedule, tuning). |
 | `src/parser.js` | Converts semicolon messages to normalized JSON (never throws). |
 | `src/forwarder.js` | POSTs to the Worker with timeout + exponential-backoff retry. |
 | `src/logger.js` | Structured single-line JSON logging. |
 
-Behavior: auto-reconnect, per-message forward with retry, periodic heartbeat
-log, optional dead-man's-switch ping, clean `SIGINT`/`SIGTERM` shutdown.
+Behavior: controllable MQTT, auto-reconnect while running, per-message forward
+with retry, periodic heartbeat log, optional dead-man's-switch ping, clean
+`SIGINT`/`SIGTERM` shutdown (stops MQTT then exits the process).
 
 ### 2. Cloudflare Worker (`cloudflare-worker/`)
 
 | File | Responsibility |
 |------|----------------|
-| `src/index.js` | Entry: auth → validate → sign → fan-out → aggregate. |
+| `src/index.js` | Entry: fan-out path + control route auth/proxy. |
+| `src/control.js` | Forward `/start` `/stop` `/status` to `LISTENER_CONTROL_URL`. |
 | `src/hmac.js` | `hmacSha256Hex` + constant-time `timingSafeEqual`. |
 | `src/sites.js` | Parse `WP_SITES` into normalized descriptors. |
 | `src/validator.js` | Validate a message + normalize body (single or batch). |
 | `src/forwarder.js` | Per-site POST with timeout + retry (5xx retried, 4xx not). |
 
-Behavior: constant-time listener-secret check, payload validation at the edge,
-per-message per-site HMAC signature, batching (array payloads), retry/timeout,
-structured logs, aggregated metrics + per-site results.
+Behavior: constant-time listener-secret check (messages + control), optional
+HMAC for WordPress control calls, payload validation at the edge, per-message
+per-site HMAC signature, batching, retry/timeout, structured logs.
 
 ### 3. WordPress plugin (`wordpress-plugin/jackpot-sync/`)
 
@@ -68,7 +92,8 @@ Modular service classes under `includes/` (each single-responsibility):
 | `Jackpot_Sync_Processor` | Orchestrator used by REST + admin tester. |
 | `Jackpot_Sync_Rest_Controller` | Thin HTTP layer (routes, signature, response). |
 | `Jackpot_Sync_Retention` | Hourly cron pruning to newest N. |
-| `Jackpot_Sync_Admin` | Settings page, dashboard, Tools → Jackpot Tester. |
+| `Jackpot_Sync_Mqtt_Control` | HMAC-signed Worker calls for MQTT start/stop/status. |
+| `Jackpot_Sync_Admin` | Settings page, MQTT panel, AJAX, Tools → Jackpot Tester. |
 | `Jackpot_Sync_Plugin` | Service container + bootstrapper. |
 
 `includes/helpers.php` keeps the old procedural API (`jackpot_get`,
@@ -109,6 +134,17 @@ Worker POST → verify_signature → Processor.process
   → metrics + structured log
 ```
 
+### MQTT control (admin / cron)
+
+```
+Admin button → admin-ajax.php (nonce + manage_options)
+  → Jackpot_Sync_Mqtt_Control (HMAC X-Signature with shared secret)
+  → Worker /start|/stop|/status
+  → Node control API (x-listener-secret)
+  → startMQTT() / stopMQTT() / getStatus()
+  → JSON back to admin UI (no page reload)
+```
+
 ## Identity + storage
 
 - The **unique key is `jpId`** (never title, amount, or image).
@@ -124,3 +160,5 @@ Worker POST → verify_signature → Processor.process
 - `do_action('jackpot_sync_after_purge', $post_id)` fires after cache purge.
 - Multi-topic listener (`MQTT_TOPIC` comma-separated) for future feeds.
 - Worker accepts a JSON array to batch multiple messages in one request.
+- Scheduling: built-in Node schedule **or** external cron/PM2/systemd
+  (see [SCHEDULING.md](SCHEDULING.md)).

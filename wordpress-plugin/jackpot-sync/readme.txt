@@ -3,13 +3,13 @@ Contributors: rise-web
 Requires at least: 5.8
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 3.0.0
+Stable tag: 3.1.0
 License: GPLv2 or later
 
 Fully automated real-time jackpot sync. Receives signed jackpot data from the
 Cloudflare Worker and creates/updates the Jackpot Custom Post Type and ACF
 fields automatically. Everything is configured from an admin page — no file
-editing required.
+editing required. Includes MQTT Start/Stop controls via the Worker.
 
 == Install (3 steps) ==
 
@@ -61,6 +61,14 @@ rejected. For maximum security you may lock the secret in wp-config.php:
 An hourly job keeps only the newest N jackpots (default 20, configurable).
 
 == Changelog ==
+
+= 3.1.0 =
+* MQTT Listener control panel on Settings → Jackpot Sync (Start / Stop / Refresh).
+* AJAX controls proxy through the Cloudflare Worker to the Node listener.
+* Worker endpoints: POST /start, POST /stop, GET /status.
+* Node listener no longer connects MQTT on boot; controllable via HTTP API.
+* Built-in daily schedule (06:00 start / 08:00 stop) plus cron/PM2/systemd examples.
+* New setting: Cloudflare Worker URL (for MQTT control).
 
 = 3.0.0 =
 * Refactored into modular service classes (settings, logger, parser, formatter,

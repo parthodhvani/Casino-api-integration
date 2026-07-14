@@ -5,10 +5,14 @@
 ```
 DRGT/MQTT  ──►  Listener  ──►  Worker  ──►  WordPress
              (LISTENER_SECRET)   (JACKPOT_SECRET / X-Signature)
+
+WordPress / Cron  ──►  Worker (/start|/stop|/status)  ──►  Listener control API
+   (HMAC JACKPOT_SECRET          (LISTENER_SECRET)
+    or LISTENER_SECRET)
 ```
 
 Two independent shared secrets protect the two hops that cross the public
-internet.
+internet. MQTT control reuses the same secrets.
 
 ## Hop 1 — Listener → Worker
 
@@ -60,11 +64,22 @@ behavior in.
 - WordPress `Jackpot_Sync_Message_Parser::validate_payload` enforces the schema
   and returns proper REST error codes (`400`, `202`).
 
+## MQTT control plane
+
+- Listener control API (`POST /start`, `POST /stop`, `GET /status`) requires
+  `x-listener-secret` compared with constant-time equality. `/health` is open
+  (liveness only).
+- Worker control routes accept either:
+  - `x-listener-secret` (cron / scripts), or
+  - `X-Signature: HMAC-SHA256(JACKPOT_SECRET, body)` (WordPress AJAX; GET signs `""`, POST signs `{}`).
+- WordPress AJAX handlers require `manage_options` + `check_ajax_referer('jackpot_mqtt_control')`.
+- Admin output is escaped (`esc_html` / `esc_attr` / `esc_url`).
+
 ## Least privilege / hardening
 
 - Only the signed `/update` route performs writes; `/ping` is read-only.
 - Admin tester + settings require the `manage_options` capability and use
-  nonces (`check_admin_referer`).
+  nonces (`check_admin_referer` / `check_ajax_referer`).
 - The signing secret can be locked in `wp-config.php` (`JACKPOT_SECRET`) so it
   is not editable from the dashboard.
 - Secrets are generated with `openssl rand -hex 32` and never committed.
@@ -75,3 +90,5 @@ behavior in.
 - Put the WordPress endpoint behind the site's normal TLS; ensure the WAF does
   not strip the `X-Signature` header (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 - Use per-site secrets in `WP_SITES` for stronger isolation across sites.
+- Expose the listener control port only to Cloudflare (or localhost + cron), not
+  the public internet without the secret header.

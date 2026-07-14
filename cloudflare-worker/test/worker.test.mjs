@@ -10,6 +10,7 @@ import { hmacSha256Hex, timingSafeEqual } from '../src/hmac.js';
 import { parseSites } from '../src/sites.js';
 import { validateMessage, parseBody } from '../src/validator.js';
 import { forwardToSite } from '../src/forwarder.js';
+import { forwardControl } from '../src/control.js';
 
 test('hmacSha256Hex produces a 64-char hex digest', async () => {
   const sig = await hmacSha256Hex('secret', 'hello');
@@ -112,4 +113,51 @@ test('forwardToSite errors without a secret', async () => {
   const res = await forwardToSite({ name: 'a', url: 'https://a/x' }, '{}', undefined);
   assert.equal(res.ok, false);
   assert.match(res.error, /no secret/);
+});
+
+test('forwardControl requires LISTENER_CONTROL_URL', async () => {
+  const res = await forwardControl('status', { LISTENER_SECRET: 's' });
+  assert.equal(res.status, 500);
+  const body = await res.json();
+  assert.match(body.error, /LISTENER_CONTROL_URL/);
+});
+
+test('forwardControl proxies status to listener', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    assert.match(String(url), /\/status$/);
+    assert.equal(opts.method, 'GET');
+    assert.equal(opts.headers['x-listener-secret'], 'secret');
+    return new Response(JSON.stringify({ status: 'Running', running: true }), { status: 200 });
+  };
+  try {
+    const res = await forwardControl('status', {
+      LISTENER_CONTROL_URL: 'http://listener:3099',
+      LISTENER_SECRET: 'secret',
+      CONTROL_TIMEOUT_MS: '1000',
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, 'Running');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('forwardControl maps network errors to 502', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('connection refused');
+  };
+  try {
+    const res = await forwardControl('start', {
+      LISTENER_CONTROL_URL: 'http://listener:3099',
+      LISTENER_SECRET: 'secret',
+    });
+    assert.equal(res.status, 502);
+    const body = await res.json();
+    assert.match(body.error, /unavailable/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

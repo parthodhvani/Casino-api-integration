@@ -81,6 +81,17 @@ function wp_json_encode($data) { return json_encode($data); }
 function esc_html($s) { return htmlspecialchars((string) $s, ENT_QUOTES); }
 function __($s, $d = null) { return $s; }
 function esc_html__($s, $d = null) { return $s; }
+function esc_url_raw($url) {
+    $url = trim((string) $url);
+    if ($url === '') {
+        return '';
+    }
+    return filter_var($url, FILTER_SANITIZE_URL) ?: $url;
+}
+function untrailingslashit($s) { return rtrim((string) $s, '/'); }
+function wp_date($format, $timestamp = null, $timezone = null) {
+    return date($format, $timestamp ?? time());
+}
 
 function add_action($hook, $cb, $prio = 10, $args = 1) { $GLOBALS['_jp_actions'][$hook][] = $cb; return true; }
 function add_filter($hook, $cb, $prio = 10, $args = 1) { return true; }
