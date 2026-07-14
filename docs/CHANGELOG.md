@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The project follows
 semantic-ish versioning aligned with the plugin version.
 
+## [3.1.1] — 2026-07-14
+
+### Cloudflare Worker
+
+**Changed**
+- All Worker logic lives in one file: [`cloudflare-worker/worker.js`](../cloudflare-worker/worker.js).
+- Removed the modular `src/` folder (`index`, `control`, `forwarder`, `hmac`, `sites`, `validator`).
+- Paste `worker.js` into Cloudflare Dashboard → Edit Code (no Wrangler required).
+- `wrangler.toml` `main` points at `worker.js`.
+
 ## [3.1.0] — 2026-07-14
 
 MQTT Start / Stop control across the full stack. Architecture unchanged:

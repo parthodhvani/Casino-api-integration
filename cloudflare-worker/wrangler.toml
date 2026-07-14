@@ -1,5 +1,5 @@
 name = "jackpot-worker"
-main = "src/index.js"
+main = "worker.js"
 compatibility_date = "2026-01-01"
 
 # List of WordPress sites to fan out to (JSON).
@@ -24,6 +24,10 @@ LISTENER_CONTROL_URL = "http://127.0.0.1:3099"
 # Optional control proxy timeout (ms)
 CONTROL_TIMEOUT_MS = "8000"
 
-# Secrets are NOT stored here. Set them with:
-#   wrangler secret put LISTENER_SECRET
-#   wrangler secret put JACKPOT_SECRET
+# Secrets are NOT stored here. Set them in the Cloudflare Dashboard:
+#   Settings → Variables → Secrets
+#     LISTENER_SECRET
+#     JACKPOT_SECRET
+#
+# Dashboard paste deploy (no Wrangler):
+#   Workers & Pages → your worker → Edit Code → paste worker.js

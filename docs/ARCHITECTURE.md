@@ -62,12 +62,9 @@ with retry, periodic heartbeat log, optional dead-man's-switch ping, clean
 
 | File | Responsibility |
 |------|----------------|
-| `src/index.js` | Entry: fan-out path + control route auth/proxy. |
-| `src/control.js` | Forward `/start` `/stop` `/status` to `LISTENER_CONTROL_URL`. |
-| `src/hmac.js` | `hmacSha256Hex` + constant-time `timingSafeEqual`. |
-| `src/sites.js` | Parse `WP_SITES` into normalized descriptors. |
-| `src/validator.js` | Validate a message + normalize body (single or batch). |
-| `src/forwarder.js` | Per-site POST with timeout + retry (5xx retried, 4xx not). |
+| `worker.js` | **Only Worker source file.** Paste into Cloudflare Dashboard → Edit Code. Contains entry, HMAC, sites parser, validator, WordPress forwarder, and MQTT control proxy. |
+| `wrangler.toml` | Optional Wrangler config (`main = "worker.js"`) + vars. |
+| `test/` | Unit tests against `worker.js`. |
 
 Behavior: constant-time listener-secret check (messages + control), optional
 HMAC for WordPress control calls, payload validation at the edge, per-message
