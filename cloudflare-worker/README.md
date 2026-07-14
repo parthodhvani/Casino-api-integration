@@ -58,4 +58,27 @@ npm run tail     # live logs
 - Returns `200` if everything succeeded, `207` if any site/message failed
   (per-message, per-site detail in `results`), plus a `metrics` summary.
 
-Optional tuning vars (`wrangler.toml`): `FORWARD_RETRIES`, `FORWARD_TIMEOUT_MS`.
+Optional tuning vars (`wrangler.toml`): `FORWARD_RETRIES`, `FORWARD_TIMEOUT_MS`,
+`CONTROL_TIMEOUT_MS`.
+
+## MQTT control endpoints (v3.1)
+
+Proxies to the Node listener (`LISTENER_CONTROL_URL`):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/start` | Connect MQTT + subscribe |
+| POST | `/stop` | Disconnect MQTT (Node process stays up) |
+| GET | `/status` | Running / Stopped / last sync / connection state |
+
+Auth (either):
+
+- Header `x-listener-secret: <LISTENER_SECRET>` (cron / scripts), or
+- Header `X-Signature: <hmac-sha256(JACKPOT_SECRET, body)>` (WordPress AJAX)
+
+Set in `wrangler.toml`:
+
+```toml
+LISTENER_CONTROL_URL = "https://your-listener-host:3099"
+CONTROL_TIMEOUT_MS = "8000"
+```

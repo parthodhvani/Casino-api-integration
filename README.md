@@ -1,4 +1,4 @@
-# Casino Real-time Jackpot Sync (v3.0.0)
+# Casino Real-time Jackpot Sync (v3.1.0)
 
 Fully automated, real-time jackpot pipeline for WordPress casino sites. It
 replaces manual ACF entry with an end-to-end automated stream: DRGT publishes
@@ -7,7 +7,8 @@ Worker, the Worker signs and fans them out to each WordPress site, and the
 `jackpot-sync` plugin creates/updates the Jackpot CPT + ACF fields — which the
 existing Elementor carousel renders automatically.
 
-WordPress never talks to MQTT directly.
+WordPress never talks to MQTT directly. MQTT connect/disconnect is controllable
+via Worker + admin UI (and a daily 06:00–08:00 schedule).
 
 ## Architecture
 
@@ -15,10 +16,10 @@ WordPress never talks to MQTT directly.
 [DRGT Casino System]
         │ MQTT (HiveMQ, semicolon-separated messages)
         ▼
-[MQTT Listener]  (Node, persistent connection, reconnect + retry + heartbeat)
+[MQTT Listener]  (Node — controllable start/stop, reconnect + retry + heartbeat)
         │ HTTPS POST (normalized JSON + x-listener-secret)
         ▼
-[Cloudflare Worker]  (auth, validate, HMAC-sign, retry, fan-out to N sites)
+[Cloudflare Worker]  (auth, validate, HMAC-sign, retry, fan-out + MQTT control proxy)
         │ HTTPS POST (JSON + X-Signature: HMAC-SHA256)
         ▼
 [WordPress REST]  /wp-json/jackpot/v1/update   (jackpot-sync plugin, ×N sites)
@@ -27,29 +28,30 @@ WordPress never talks to MQTT directly.
 [Jackpot CPT] → [ACF] → [Elementor Carousel]
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed data flow,
-message formats, and component responsibilities.
+MQTT control: `WP Admin / Cron → Worker (/start|/stop|/status) → Node → MQTT`
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+[`docs/SCHEDULING.md`](docs/SCHEDULING.md).
 
 ## Repository layout
 
 | Folder | Stack | What it is |
 |--------|-------|------------|
-| `wordpress-plugin/jackpot-sync/` | WordPress/PHP | Signed REST endpoint, modular services (parser, image resolver, creator, updater, cache, retention), admin dashboard + tester. Configured from **Settings → Jackpot Sync** — no file editing. |
+| `wordpress-plugin/jackpot-sync/` | WordPress/PHP | Signed REST endpoint, modular services, admin dashboard + MQTT controls + tester. Configured from **Settings → Jackpot Sync**. |
 | `wordpress-plugin/tests/` | PHP | In-memory functional test suite for the plugin (no WP install needed). |
-| `cloudflare-worker/` | Cloudflare | Authenticates the listener, validates + signs payloads, fans out to all sites with retry/timeout. Includes `node:test` suite. |
-| `mqtt-listener/` | Node + HiveMQ | Holds the MQTT connection, parses messages, forwards to the Worker with retry/heartbeat/graceful shutdown. Includes `node:test` suite. |
+| `cloudflare-worker/` | Cloudflare | Authenticates the listener, validates + signs payloads, fans out, proxies MQTT control. Includes `node:test` suite. |
+| `mqtt-listener/` | Node + HiveMQ | Controllable MQTT connection, HTTP `/start` `/stop` `/status`, daily schedule, forwards to Worker. |
 | `tools/` | Node | `simulate-message.js` — send a fake message to the Worker (or directly to WordPress) to test without live MQTT. |
-| `docs/` | — | Full documentation set (setup, install, testing, deployment, security, troubleshooting, changelog). |
+| `docs/` | — | Full documentation set (setup, install, testing, deployment, scheduling, security, troubleshooting, changelog). |
 
 ## Quick start
 
-1. **Plugin** — upload `wordpress-plugin/jackpot-sync` (or the built
-   `jackpot-sync-v3.0.0.zip`) and activate, then set the shared secret on
-   **Settings → Jackpot Sync**. See [`docs/INSTALL.md`](docs/INSTALL.md).
-2. **Worker** — set `JACKPOT_SECRET` + `LISTENER_SECRET`, configure `WP_SITES`,
-   `npm install && npm run deploy`. See [`cloudflare-worker/README.md`](cloudflare-worker/README.md).
+1. **Plugin** — upload `wordpress-plugin/jackpot-sync` and activate, then set the
+   shared secret + Worker URL on **Settings → Jackpot Sync**. See [`docs/INSTALL.md`](docs/INSTALL.md).
+2. **Worker** — set `JACKPOT_SECRET` + `LISTENER_SECRET`, configure `WP_SITES` +
+   `LISTENER_CONTROL_URL`, `npm install && npm run deploy`.
 3. **Listener** — copy `.env.example` to `.env`, fill in values, `npm install && npm start`.
-   See [`mqtt-listener/README.md`](mqtt-listener/README.md).
+   MQTT stays idle until `/start`, the schedule, or `MQTT_AUTO_START=true`.
 
 Full walkthrough: [`docs/SETUP.md`](docs/SETUP.md).
 
@@ -76,13 +78,13 @@ JPUPDATE;O136;2;0;217;53467;867;0;IFCO
 ## Testing
 
 ```bash
-# Plugin (PHP): 48 functional checks
+# Plugin (PHP)
 php wordpress-plugin/tests/run-tests.php
 
-# Worker (Node): 11 tests
+# Worker (Node)
 cd cloudflare-worker && npm test
 
-# Listener (Node): 10 tests
+# Listener (Node)
 cd mqtt-listener && npm test
 ```
 
@@ -92,8 +94,9 @@ See [`docs/TESTING.md`](docs/TESTING.md) for the full test + manual QA guide.
 
 - Listener → Worker: shared `x-listener-secret` (constant-time compare).
 - Worker → WordPress: HMAC-SHA256 `X-Signature` over the exact body bytes,
-  verified with `hash_equals` (constant-time). Details in
-  [`docs/SECURITY.md`](docs/SECURITY.md).
+  verified with `hash_equals` (constant-time).
+- MQTT control: same listener secret and/or HMAC with `JACKPOT_SECRET`.
+  Details in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Documentation
 
@@ -101,6 +104,7 @@ See [`docs/TESTING.md`](docs/TESTING.md) for the full test + manual QA guide.
 - [INSTALL.md](docs/INSTALL.md) — plugin install options
 - [TESTING.md](docs/TESTING.md) — automated + manual testing
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) — deploy each component independently
+- [SCHEDULING.md](docs/SCHEDULING.md) — daily 06:00/08:00 + Cron / PM2 / Systemd
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — data flow + component design
 - [SECURITY.md](docs/SECURITY.md) — threat model + signature scheme
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common issues

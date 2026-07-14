@@ -30,6 +30,8 @@ class Jackpot_Sync_Settings {
     public static function defaults() {
         return [
             'secret'              => '',
+            // Cloudflare Worker base URL used for MQTT start/stop/status control.
+            'worker_url'          => '',
             'cpt'                 => 'jackpot',
             // ACF field names. Per the brief the two live ACF fields are
             // "amount" and "shared_profit_amount".
@@ -97,6 +99,7 @@ class Jackpot_Sync_Settings {
         $out      = [];
 
         $out['secret']       = isset($input['secret']) ? trim(sanitize_text_field($input['secret'])) : '';
+        $out['worker_url']   = isset($input['worker_url']) ? esc_url_raw(trim((string) $input['worker_url'])) : '';
         $out['cpt']          = !empty($input['cpt']) ? sanitize_key($input['cpt']) : $defaults['cpt'];
         $out['field_amount'] = !empty($input['field_amount']) ? sanitize_key($input['field_amount']) : $defaults['field_amount'];
         $out['field_shared'] = !empty($input['field_shared']) ? sanitize_key($input['field_shared']) : $defaults['field_shared'];

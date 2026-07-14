@@ -10,7 +10,6 @@ install required**.
 
 ```bash
 php wordpress-plugin/tests/run-tests.php
-# -> Passed: 48, Failed: 0
 ```
 
 What it covers:
@@ -25,6 +24,8 @@ What it covers:
 - JPUPDATE before JPCONFIG → 202 skip
 - Retention (keep newest N, delete the rest)
 - HMAC signature parity + constant-time compare
+- MQTT control settings defaults + sanitize (`worker_url`)
+- MQTT status cache + time formatting helpers
 
 Lint every PHP file:
 
@@ -36,12 +37,12 @@ find wordpress-plugin/jackpot-sync -name '*.php' -exec php -l {} \;
 
 ```bash
 cd cloudflare-worker && npm install && npm test
-# -> 11 pass
 ```
 
 Covers HMAC (incl. a known vector), constant-time compare, `WP_SITES` parsing,
-message validation, body parsing (single + batch), and forwarder retry/timeout
-behavior (5xx retried, 4xx not, no-secret error).
+message validation, body parsing (single + batch), forwarder retry/timeout
+behavior (5xx retried, 4xx not, no-secret error), and control proxy
+(`forwardControl` URL required, status proxy, network → 502).
 
 Build check:
 
@@ -53,11 +54,10 @@ cd cloudflare-worker && npx wrangler deploy --dry-run
 
 ```bash
 cd mqtt-listener && npm install && npm test
-# -> 10 pass
 ```
 
-Covers parser (incl. whitespace + missing-field rejection) and forwarder
-retry/timeout behavior.
+Covers parser, forwarder retry/timeout, MQTT manager start/stop/already_running,
+control-server auth + routes, scheduler `zonedParts`, timing-safe secret compare.
 
 ## Manual / end-to-end tests
 
@@ -95,13 +95,67 @@ JACKPOT_SECRET="your-secret" \
 node tools/simulate-message.js update --direct
 ```
 
-### 4. Full pipeline checklist
+### 4. MQTT Start / Stop / Status
 
-1. Listener terminal → `message received` then `forwarded to worker`.
-2. Worker logs (`npm run tail`) → incoming POST + per-site results.
-3. WordPress → `wp-admin/edit.php?post_type=jackpot`: JPCONFIG creates a post,
+**Listener direct:**
+
+```bash
+# Process is up, MQTT idle
+curl -s http://127.0.0.1:3099/health
+
+# Start
+curl -s -X POST -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/start
+# → {"status":"started",...}
+
+# Already running
+curl -s -X POST -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/start
+# → {"status":"already_running"}
+
+# Status
+curl -s -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/status
+
+# Stop (process stays alive)
+curl -s -X POST -H "x-listener-secret: $LISTENER_SECRET" http://127.0.0.1:3099/stop
+```
+
+**Via Worker:**
+
+```bash
+curl -s -X POST -H "x-listener-secret: $LISTENER_SECRET" \
+  https://jackpot-worker.EXAMPLE.workers.dev/start
+curl -s -H "x-listener-secret: $LISTENER_SECRET" \
+  https://jackpot-worker.EXAMPLE.workers.dev/status
+curl -s -X POST -H "x-listener-secret: $LISTENER_SECRET" \
+  https://jackpot-worker.EXAMPLE.workers.dev/stop
+```
+
+**WordPress admin:**
+
+1. Set **Shared secret** + **Cloudflare Worker URL** on Settings → Jackpot Sync.
+2. Click **Refresh Status** — UI updates without reload.
+3. Click **Start MQTT** — indicator turns Running (green).
+4. Click **Stop MQTT** — indicator turns Stopped (red).
+5. Wrong secret / unreachable Worker → red admin notice with a clear message.
+
+### 5. Automatic 06:00 / 08:00 schedule
+
+**Built-in:** set `SCHEDULE_START=06:00`, `SCHEDULE_STOP=08:00`, `SCHEDULE_TZ=…`,
+`SCHEDULE_ENABLED=true`. Watch logs around those times for
+`scheduler start window` / `scheduler stop window`.
+
+**External:** temporarily set times a few minutes ahead, or use cron examples in
+[SCHEDULING.md](SCHEDULING.md). Confirm `GET /status` flips Running → Stopped
+while `GET /health` (and `ps`) still show the Node process alive.
+
+### 6. Full pipeline checklist
+
+1. Start MQTT (admin or `/start`).
+2. Listener terminal → `message received` then `forwarded to worker`.
+3. Worker logs (`npm run tail`) → incoming POST + per-site results.
+4. WordPress → `wp-admin/edit.php?post_type=jackpot`: JPCONFIG creates a post,
    JPUPDATE changes the two ACF values.
-4. Front-end carousel updates after cache purge.
+5. Front-end carousel updates after cache purge.
+6. Stop MQTT — messages stop; process + control API remain up.
 
 ### Euros vs cents
 

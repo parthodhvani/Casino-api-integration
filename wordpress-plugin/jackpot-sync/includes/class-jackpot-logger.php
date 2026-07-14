@@ -92,6 +92,11 @@ class Jackpot_Sync_Logger {
             'last_http_code'     => 0,
             'last_execution_ms'  => 0,
             'worker_status'      => 'No request received yet',
+            // MQTT listener control (Feature 8).
+            'mqtt_state'         => 'Unknown',
+            'mqtt_last_sync'     => '',
+            'mqtt_last_message'  => '',
+            'mqtt_last_config'   => '',
         ];
     }
 

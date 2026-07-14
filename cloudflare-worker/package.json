@@ -1,9 +1,9 @@
 {
   "name": "jackpot-worker",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker that authenticates, validates, signs and fans out jackpot updates to WordPress sites.",
+  "description": "Cloudflare Worker that authenticates, validates, signs and fans out jackpot updates to WordPress sites, and proxies MQTT start/stop/status control.",
   "engines": {
     "node": ">=18"
   },

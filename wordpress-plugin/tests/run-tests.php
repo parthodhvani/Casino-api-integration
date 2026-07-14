@@ -181,6 +181,36 @@ check('hmac is 64 hex chars', strlen($sig) === 64 && ctype_xdigit($sig));
 check('hash_equals constant-time match', hash_equals($sig, hash_hmac('sha256', $body, $secret)));
 check('hash_equals rejects wrong', !hash_equals($sig, hash_hmac('sha256', $body, 'wrong')));
 
+echo "\n== MQTT control settings + cache ==\n";
+require $base . 'class-jackpot-mqtt-control.php';
+_jp_reset_store();
+$defaults = Jackpot_Sync_Settings::defaults();
+check('settings include worker_url', array_key_exists('worker_url', $defaults));
+$san = Jackpot_Sync_Settings::sanitize([
+    'secret'     => 'abc',
+    'worker_url' => 'https://jackpot-worker.example.workers.dev/',
+    'cpt'        => 'jackpot',
+]);
+check('sanitize keeps worker_url host', strpos($san['worker_url'], 'jackpot-worker.example.workers.dev') !== false);
+
+Jackpot_Sync_Mqtt_Control::cache_status([
+    'status'           => 'Running',
+    'running'          => true,
+    'connectionState'  => 'connected',
+    'lastSyncTime'     => '2026-07-14T06:42:00.000Z',
+    'lastMessageAt'    => '2026-07-14T06:55:00.000Z',
+    'lastConfigUpdate' => '2026-07-14T06:10:00.000Z',
+]);
+$cached = Jackpot_Sync_Mqtt_Control::get_cached_status();
+check('mqtt cache status Running', $cached['status'] === 'Running');
+check('mqtt cache running true', $cached['running'] === true);
+check('mqtt format_time empty', Jackpot_Sync_Mqtt_Control::format_time('') === '—');
+check('mqtt format_time iso', Jackpot_Sync_Mqtt_Control::format_time('2026-07-14T06:42:00.000Z') !== '—');
+
+$fail = Jackpot_Sync_Mqtt_Control::status();
+check('mqtt status fails without worker_url', $fail['ok'] === false);
+check('mqtt status error code worker_not_configured', ($fail['error_code'] ?? '') === 'worker_not_configured');
+
 echo "\n----------------------------------------\n";
 echo "Passed: {$passed}, Failed: {$failed}\n";
 exit($failed === 0 ? 0 : 1);

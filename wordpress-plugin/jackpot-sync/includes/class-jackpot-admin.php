@@ -38,9 +38,54 @@ class Jackpot_Sync_Admin {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_init', [$this, 'maybe_activation_redirect']);
         add_action('admin_notices', [$this, 'maybe_config_notice']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
         add_action('admin_post_jackpot_process_test_message', [$this, 'handle_test_message']);
         add_action('admin_post_jackpot_clear_log', [$this, 'handle_clear_log']);
+        add_action('wp_ajax_jackpot_mqtt_start', [$this, 'ajax_mqtt_start']);
+        add_action('wp_ajax_jackpot_mqtt_stop', [$this, 'ajax_mqtt_stop']);
+        add_action('wp_ajax_jackpot_mqtt_status', [$this, 'ajax_mqtt_status']);
         add_filter('plugin_action_links_' . JACKPOT_SYNC_BASENAME, [$this, 'add_settings_link']);
+    }
+
+    /**
+     * Enqueue admin assets on the settings page only.
+     *
+     * @param string $hook Current admin page hook.
+     * @return void
+     */
+    public function enqueue_assets($hook) {
+        if ($hook !== 'settings_page_jackpot-sync') {
+            return;
+        }
+
+        wp_enqueue_style(
+            'jackpot-sync-admin',
+            JACKPOT_SYNC_URL . 'assets/admin.css',
+            [],
+            JACKPOT_SYNC_VERSION
+        );
+
+        wp_enqueue_script(
+            'jackpot-sync-admin',
+            JACKPOT_SYNC_URL . 'assets/admin.js',
+            [],
+            JACKPOT_SYNC_VERSION,
+            true
+        );
+
+        wp_localize_script('jackpot-sync-admin', 'JackpotSyncAdmin', [
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce'   => wp_create_nonce('jackpot_mqtt_control'),
+            'i18n'    => [
+                'starting'   => __('Starting MQTT…', 'jackpot-sync'),
+                'stopping'   => __('Stopping MQTT…', 'jackpot-sync'),
+                'refreshing' => __('Refreshing status…', 'jackpot-sync'),
+                'running'    => __('Running', 'jackpot-sync'),
+                'stopped'    => __('Stopped', 'jackpot-sync'),
+                'unknown'    => __('Unknown', 'jackpot-sync'),
+                'error'      => __('Something went wrong. Please try again.', 'jackpot-sync'),
+            ],
+        ]);
     }
 
     /**
@@ -164,6 +209,105 @@ class Jackpot_Sync_Admin {
     }
 
     /**
+     * AJAX: start MQTT listener.
+     *
+     * @return void
+     */
+    public function ajax_mqtt_start() {
+        $this->ajax_mqtt_dispatch('start');
+    }
+
+    /**
+     * AJAX: stop MQTT listener.
+     *
+     * @return void
+     */
+    public function ajax_mqtt_stop() {
+        $this->ajax_mqtt_dispatch('stop');
+    }
+
+    /**
+     * AJAX: refresh MQTT status.
+     *
+     * @return void
+     */
+    public function ajax_mqtt_status() {
+        $this->ajax_mqtt_dispatch('status');
+    }
+
+    /**
+     * Shared AJAX dispatcher for MQTT control actions.
+     *
+     * @param string $action start|stop|status
+     * @return void
+     */
+    private function ajax_mqtt_dispatch($action) {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error([
+                'message' => __('You do not have permission to manage MQTT.', 'jackpot-sync'),
+            ], 403);
+        }
+
+        check_ajax_referer('jackpot_mqtt_control', 'nonce');
+
+        if ($action === 'start') {
+            $result = Jackpot_Sync_Mqtt_Control::start();
+        } elseif ($action === 'stop') {
+            $result = Jackpot_Sync_Mqtt_Control::stop();
+        } else {
+            $result = Jackpot_Sync_Mqtt_Control::status();
+        }
+
+        // Prefer a fresh status payload for the UI; fall back to cache.
+        $status = !empty($result['status_payload'])
+            ? $result['status_payload']
+            : Jackpot_Sync_Mqtt_Control::get_cached_status();
+
+        $payload = [
+            'ok'      => !empty($result['ok']),
+            'message' => isset($result['message']) ? (string) $result['message'] : '',
+            'action'  => $action,
+            'status'  => $this->present_mqtt_status($status),
+            'raw'     => isset($result['data']) ? $result['data'] : null,
+        ];
+
+        if (!empty($result['ok'])) {
+            wp_send_json_success($payload);
+        }
+
+        wp_send_json_error($payload, !empty($result['http_code']) ? (int) $result['http_code'] : 400);
+    }
+
+    /**
+     * Shape MQTT status for the admin UI (escaped display strings).
+     *
+     * @param array<string,mixed> $status Raw/cached status.
+     * @return array<string,mixed>
+     */
+    private function present_mqtt_status(array $status) {
+        $running = !empty($status['running']) || (isset($status['status']) && strcasecmp((string) $status['status'], 'Running') === 0);
+        $label   = $running ? 'Running' : ((isset($status['status']) && $status['status'] !== 'Unknown') ? (string) $status['status'] : 'Stopped');
+        if (isset($status['status']) && strcasecmp((string) $status['status'], 'Unknown') === 0 && !isset($status['running'])) {
+            $label = 'Unknown';
+            $running = false;
+        }
+
+        return [
+            'running'              => $running,
+            'label'                => $label,
+            'connectionState'      => isset($status['connectionState']) ? (string) $status['connectionState'] : 'unknown',
+            'lastSyncTime'         => isset($status['lastSyncTime']) ? (string) $status['lastSyncTime'] : '',
+            'lastMessageAt'        => isset($status['lastMessageAt']) ? (string) $status['lastMessageAt'] : '',
+            'lastConfigUpdate'     => isset($status['lastConfigUpdate']) ? (string) $status['lastConfigUpdate'] : '',
+            'lastSyncDisplay'      => Jackpot_Sync_Mqtt_Control::format_time($status['lastSyncTime'] ?? ''),
+            'lastMessageDisplay'   => Jackpot_Sync_Mqtt_Control::format_time($status['lastMessageAt'] ?? ''),
+            'lastConfigDisplay'    => Jackpot_Sync_Mqtt_Control::format_time($status['lastConfigUpdate'] ?? ''),
+            'lastError'            => isset($status['lastError']) ? (string) $status['lastError'] : '',
+            'fetched_at'           => isset($status['fetched_at']) ? (string) $status['fetched_at'] : '',
+        ];
+    }
+
+    /**
      * Build the health-check rows.
      *
      * @return array<int,array<string,mixed>>
@@ -179,6 +323,12 @@ class Jackpot_Sync_Admin {
                 'ok'    => !empty($secret),
                 'good'  => $constant ? 'Set via wp-config.php (JACKPOT_SECRET)' : 'Set on this page',
                 'bad'   => 'Not set — paste the secret from your Cloudflare Worker below',
+            ],
+            [
+                'label' => 'Worker URL',
+                'ok'    => !empty(Jackpot_Sync_Settings::get('worker_url')),
+                'good'  => 'Set — MQTT Start/Stop/Status can reach the Worker',
+                'bad'   => 'Not set — add the Cloudflare Worker URL below to control MQTT',
             ],
             [
                 'label' => 'ACF active',
@@ -217,12 +367,65 @@ class Jackpot_Sync_Admin {
         $ping     = Jackpot_Sync_Settings::ping_url();
         $log      = Jackpot_Sync_Logger::get_log();
         $stats    = Jackpot_Sync_Logger::get_stats();
+        $mqtt     = $this->present_mqtt_status(Jackpot_Sync_Mqtt_Control::get_cached_status());
         $clear    = wp_nonce_url(admin_url('admin-post.php?action=jackpot_clear_log'), 'jackpot_sync_clear_log');
         ?>
-        <div class="wrap">
+        <div class="wrap jackpot-sync-wrap">
             <h1>Jackpot Sync <span style="font-size:13px;color:#666">v<?php echo esc_html(JACKPOT_SYNC_VERSION); ?></span></h1>
             <p>This plugin receives live jackpot data from your Cloudflare Worker and
             writes it into the jackpot posts and ACF fields.</p>
+
+            <div id="jackpot-mqtt-notice" class="jackpot-mqtt-notice" hidden></div>
+
+            <h2 class="title">MQTT Listener</h2>
+            <div class="jackpot-mqtt-panel" id="jackpot-mqtt-panel"
+                 data-running="<?php echo $mqtt['running'] ? '1' : '0'; ?>">
+                <table class="widefat striped" style="max-width:820px">
+                    <tbody>
+                    <tr>
+                        <td style="width:230px"><strong><?php esc_html_e('MQTT Status', 'jackpot-sync'); ?></strong></td>
+                        <td>
+                            <span id="jackpot-mqtt-status-indicator" class="jackpot-mqtt-indicator <?php echo $mqtt['running'] ? 'is-running' : 'is-stopped'; ?>">
+                                <span class="jackpot-mqtt-dot" aria-hidden="true"></span>
+                                <strong id="jackpot-mqtt-status-label"><?php echo esc_html($mqtt['label']); ?></strong>
+                            </span>
+                            <span class="description" style="margin-left:8px">
+                                <?php esc_html_e('Connection:', 'jackpot-sync'); ?>
+                                <code id="jackpot-mqtt-connection"><?php echo esc_html($mqtt['connectionState']); ?></code>
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong><?php esc_html_e('Last Sync', 'jackpot-sync'); ?></strong></td>
+                        <td id="jackpot-mqtt-last-sync"><?php echo esc_html($mqtt['lastSyncDisplay']); ?></td>
+                    </tr>
+                    <tr>
+                        <td><strong><?php esc_html_e('Last Message', 'jackpot-sync'); ?></strong></td>
+                        <td id="jackpot-mqtt-last-message"><?php echo esc_html($mqtt['lastMessageDisplay']); ?></td>
+                    </tr>
+                    <tr>
+                        <td><strong><?php esc_html_e('Last Configuration Update', 'jackpot-sync'); ?></strong></td>
+                        <td id="jackpot-mqtt-last-config"><?php echo esc_html($mqtt['lastConfigDisplay']); ?></td>
+                    </tr>
+                    </tbody>
+                </table>
+
+                <p class="jackpot-mqtt-actions" style="margin-top:12px">
+                    <button type="button" class="button button-primary" id="jackpot-mqtt-start">
+                        <?php esc_html_e('Start MQTT', 'jackpot-sync'); ?>
+                    </button>
+                    <button type="button" class="button" id="jackpot-mqtt-stop">
+                        <?php esc_html_e('Stop MQTT', 'jackpot-sync'); ?>
+                    </button>
+                    <button type="button" class="button" id="jackpot-mqtt-refresh">
+                        <?php esc_html_e('Refresh Status', 'jackpot-sync'); ?>
+                    </button>
+                    <span id="jackpot-mqtt-busy" class="spinner" style="float:none;margin-top:4px"></span>
+                </p>
+                <p class="description">
+                    <?php esc_html_e('Controls the Node MQTT listener through the Cloudflare Worker. The Node process stays running — only the MQTT connection starts or stops.', 'jackpot-sync'); ?>
+                </p>
+            </div>
 
             <h2 class="title">Runtime overview</h2>
             <table class="widefat striped" style="max-width:820px">
@@ -241,6 +444,7 @@ class Jackpot_Sync_Admin {
                 <tr><td><strong>Last Error</strong></td><td><?php echo esc_html($stats['last_error'] ?: '—'); ?></td></tr>
                 <tr><td><strong>Last Execution Time</strong></td><td><?php echo esc_html((string) $stats['last_execution_ms']); ?> ms</td></tr>
                 <tr><td><strong>Worker Status (Last Request)</strong></td><td><?php echo esc_html($stats['worker_status']); ?> <?php echo $stats['last_http_code'] ? '(HTTP ' . esc_html((string) $stats['last_http_code']) . ')' : ''; ?></td></tr>
+                <tr><td><strong>MQTT State (cached)</strong></td><td><?php echo esc_html($stats['mqtt_state'] ?: 'Unknown'); ?></td></tr>
                 <tr><td><strong>Plugin Version</strong></td><td><?php echo esc_html(JACKPOT_SYNC_VERSION); ?></td></tr>
                 </tbody>
             </table>
@@ -284,8 +488,18 @@ class Jackpot_Sync_Admin {
                                 <input type="text" id="jp_secret" name="jackpot_sync_settings[secret]"
                                        value="<?php echo esc_attr($s['secret']); ?>"
                                        style="width:100%;max-width:820px;font-family:monospace">
-                                <p class="description">Must exactly match <code>JACKPOT_SECRET</code> in your Cloudflare Worker.</p>
+                                <p class="description">Must exactly match <code>JACKPOT_SECRET</code> in your Cloudflare Worker. Also used to sign MQTT control requests.</p>
                             <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="jp_worker_url">Cloudflare Worker URL</label></th>
+                        <td>
+                            <input type="url" id="jp_worker_url" name="jackpot_sync_settings[worker_url]"
+                                   value="<?php echo esc_attr($s['worker_url']); ?>"
+                                   placeholder="https://jackpot-worker.example.workers.dev"
+                                   style="width:100%;max-width:820px;font-family:monospace">
+                            <p class="description">Base Worker URL used by Start / Stop / Refresh Status (no trailing path).</p>
                         </td>
                     </tr>
                     <tr>

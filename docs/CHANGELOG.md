@@ -3,6 +3,48 @@
 All notable changes to this project are documented here. The project follows
 semantic-ish versioning aligned with the plugin version.
 
+## [3.1.0] — 2026-07-14
+
+MQTT Start / Stop control across the full stack. Architecture unchanged:
+DRGT → Node listener → Cloudflare Worker → WordPress → CPT/ACF → Elementor.
+
+### MQTT listener
+
+**Added**
+- Controllable MQTT lifecycle: `startMQTT()`, `stopMQTT()`, `isRunning()`,
+  `getStatus()` (no connect on boot by default).
+- HTTP control API: `POST /start`, `POST /stop`, `GET /status`, `GET /health`.
+- Built-in daily schedule (06:00 start / 08:00 stop, `SCHEDULE_*` env vars).
+- Constant-time `x-listener-secret` auth on control endpoints.
+- Duplicate-connection / duplicate-subscription guards; safe reconnect while running.
+- Unit tests for manager, control server, scheduler helpers.
+
+**Changed**
+- Process stays alive on MQTT stop; only the broker connection is closed.
+- Optional `MQTT_AUTO_START=true` restores legacy “connect on boot” behavior.
+
+### Cloudflare Worker
+
+**Added**
+- Control proxies: `POST /start`, `POST /stop`, `GET /status`.
+- Auth: `x-listener-secret` **or** HMAC `X-Signature` with `JACKPOT_SECRET`.
+- `LISTENER_CONTROL_URL` / `CONTROL_TIMEOUT_MS` configuration.
+- Forwards to Node and surfaces timeout / unavailable errors (502/504).
+
+### WordPress plugin
+
+**Added**
+- **Settings → Jackpot Sync → MQTT Listener** panel (status, last sync/message/config).
+- AJAX buttons: Start MQTT, Stop MQTT, Refresh Status (nonce-protected, no reload).
+- `Jackpot_Sync_Mqtt_Control` client (HMAC-signed Worker calls + error notices).
+- Setting: Cloudflare Worker URL.
+- Cached MQTT status option + logger metrics (`mqtt_state`, `mqtt_last_*`).
+
+### Docs
+
+- New [`docs/SCHEDULING.md`](SCHEDULING.md) — Linux Cron, PM2, Systemd examples.
+- Architecture / testing / deployment updates for control flow.
+
 ## [3.0.0] — 2026-07-08
 
 Full production hardening across all three components.
