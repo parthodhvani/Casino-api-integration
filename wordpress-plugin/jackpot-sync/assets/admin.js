@@ -62,6 +62,8 @@
     if (lastSync) lastSync.textContent = status.lastSyncDisplay || '—';
     if (lastMessage) lastMessage.textContent = status.lastMessageDisplay || '—';
     if (lastConfig) lastConfig.textContent = status.lastConfigDisplay || '—';
+    var lastError = $('jackpot-mqtt-last-error');
+    if (lastError) lastError.textContent = status.lastError ? status.lastError : '—';
     if (panel) panel.setAttribute('data-running', running ? '1' : '0');
   }
 

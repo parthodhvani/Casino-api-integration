@@ -20,7 +20,7 @@ export default {
 
     // --- Health (open) -------------------------------------------------
     if (method === 'GET' && path === '/') {
-      return json({ ok: true, service: 'jackpot-worker', version: '3.1.0' });
+      return json({ ok: true, service: 'jackpot-worker', version: '3.1.1' });
     }
 
     // --- MQTT control proxies ------------------------------------------
@@ -349,7 +349,24 @@ function sleep(ms) {
 async function forwardControl(action, env) {
   const base = (env.LISTENER_CONTROL_URL || '').replace(/\/+$/, '');
   if (!base) {
-    return json({ error: 'LISTENER_CONTROL_URL not configured' }, 500);
+    return json(
+      {
+        error: 'LISTENER_CONTROL_URL not configured',
+        hint: 'In Cloudflare Dashboard → Worker → Settings → Variables, add LISTENER_CONTROL_URL = public base URL of the Node control API (e.g. https://your-server.example.com:3099). Do NOT use http://127.0.0.1 — Workers cannot reach your localhost.',
+      },
+      500
+    );
+  }
+
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(base)) {
+    return json(
+      {
+        error: 'LISTENER_CONTROL_URL is not reachable from Cloudflare',
+        hint: 'Replace localhost/127.0.0.1 with a public hostname that points to your Node listener control port.',
+        LISTENER_CONTROL_URL: base,
+      },
+      500
+    );
   }
 
   if (!env.LISTENER_SECRET) {
@@ -369,6 +386,7 @@ async function forwardControl(action, env) {
         headers: {
           'content-type': 'application/json',
           'x-listener-secret': env.LISTENER_SECRET,
+          accept: 'application/json',
         },
       },
       timeoutMs
@@ -379,11 +397,21 @@ async function forwardControl(action, env) {
     try {
       body = JSON.parse(text);
     } catch {
+      const snippet = String(text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 200);
+      const looksHtml = /<\s*!doctype|<\s*html/i.test(text || '');
       return json(
         {
           error: 'invalid response from listener',
           status: res.status,
-          body: text.slice(0, 300),
+          contentType: res.headers.get('content-type') || '',
+          body: snippet,
+          hint: looksHtml
+            ? 'Listener URL returned HTML (login page, proxy error, or wrong path). LISTENER_CONTROL_URL must hit the Node control API directly (GET /status returns JSON).'
+            : 'Listener did not return JSON. Check LISTENER_CONTROL_URL points at the Node control server (port CONTROL_PORT, default 3099).',
+          targetUrl: targetUrl,
         },
         502
       );
@@ -396,7 +424,9 @@ async function forwardControl(action, env) {
     return json(
       {
         error: isTimeout ? 'listener timeout' : 'listener unavailable',
-        message,
+        message: message,
+        hint: 'Cloudflare must reach your Node control port over the public internet. Open firewall for CONTROL_PORT and use https://your-public-host:3099 (or a reverse-proxy path).',
+        targetUrl: targetUrl,
       },
       isTimeout ? 504 : 502
     );

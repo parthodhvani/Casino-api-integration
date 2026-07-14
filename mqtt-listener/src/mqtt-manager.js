@@ -109,12 +109,20 @@ function attachHandlers(c, config) {
 
   c.on('error', function (err) {
     state.lastError = err.message;
-    state.connectionState = 'error';
+    // Keep "running" intent; only mark error if we are not currently connected.
+    // Transient TLS/DNS blips must not stick forever once messages resume.
+    if (state.connectionState !== 'connected') {
+      state.connectionState = 'error';
+    }
     logger.error('mqtt error', { error: err.message });
   });
 
   c.on('message', async function (topic, message) {
     if (!running) return;
+
+    // Receiving a message proves the session is up — clear sticky error state.
+    state.connectionState = 'connected';
+    state.lastError = null;
 
     const raw = message.toString();
     state.messages++;

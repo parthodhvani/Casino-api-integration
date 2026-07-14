@@ -407,6 +407,10 @@ class Jackpot_Sync_Admin {
                         <td><strong><?php esc_html_e('Last Configuration Update', 'jackpot-sync'); ?></strong></td>
                         <td id="jackpot-mqtt-last-config"><?php echo esc_html($mqtt['lastConfigDisplay']); ?></td>
                     </tr>
+                    <tr>
+                        <td><strong><?php esc_html_e('Listener Last Error', 'jackpot-sync'); ?></strong></td>
+                        <td id="jackpot-mqtt-last-error"><?php echo esc_html($mqtt['lastError'] !== '' ? $mqtt['lastError'] : '—'); ?></td>
+                    </tr>
                     </tbody>
                 </table>
 
@@ -424,6 +428,7 @@ class Jackpot_Sync_Admin {
                 </p>
                 <p class="description">
                     <?php esc_html_e('Controls the Node MQTT listener through the Cloudflare Worker. The Node process stays running — only the MQTT connection starts or stops.', 'jackpot-sync'); ?>
+                    <?php esc_html_e(' Worker variable LISTENER_CONTROL_URL must be the public URL of the Node control API (not 127.0.0.1).', 'jackpot-sync'); ?>
                 </p>
             </div>
 
