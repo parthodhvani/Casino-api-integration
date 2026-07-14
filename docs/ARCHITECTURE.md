@@ -62,9 +62,9 @@ with retry, periodic heartbeat log, optional dead-man's-switch ping, clean
 
 | File | Responsibility |
 |------|----------------|
-| `worker.js` | **Single-file Worker** (paste into Cloudflare Dashboard Edit Code). Contains entry + HMAC + sites + validator + forwarder + control. |
-| `src/*.js` | Thin re-exports of `worker.js` (backward compatible imports). |
-| `wrangler.toml` | `main = "worker.js"` plus `WP_SITES` / control URL vars. |
+| `worker.js` | **Only Worker source file.** Paste into Cloudflare Dashboard → Edit Code. Contains entry, HMAC, sites parser, validator, WordPress forwarder, and MQTT control proxy. |
+| `wrangler.toml` | Optional Wrangler config (`main = "worker.js"`) + vars. |
+| `test/` | Unit tests against `worker.js`. |
 
 Behavior: constant-time listener-secret check (messages + control), optional
 HMAC for WordPress control calls, payload validation at the edge, per-message

@@ -8,10 +8,10 @@ semantic-ish versioning aligned with the plugin version.
 ### Cloudflare Worker
 
 **Changed**
-- Merged all Worker modules into a single pasteable [`cloudflare-worker/worker.js`](../cloudflare-worker/worker.js)
-  for Cloudflare Dashboard → Edit Code (no Wrangler required).
-- `wrangler.toml` `main` now points at `worker.js`.
-- `src/*.js` are thin re-exports of `worker.js` for backward compatibility.
+- All Worker logic lives in one file: [`cloudflare-worker/worker.js`](../cloudflare-worker/worker.js).
+- Removed the modular `src/` folder (`index`, `control`, `forwarder`, `hmac`, `sites`, `validator`).
+- Paste `worker.js` into Cloudflare Dashboard → Edit Code (no Wrangler required).
+- `wrangler.toml` `main` points at `worker.js`.
 
 ## [3.1.0] — 2026-07-14
 
