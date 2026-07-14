@@ -3,7 +3,23 @@
 Middleware that receives normalized jackpot JSON from the MQTT listener, signs
 it, and forwards it to each WordPress site.
 
-## Setup
+**Single-file deploy:** `worker.js` is the complete Worker — paste it into the
+Cloudflare Dashboard (no Wrangler required).
+
+## Deploy via Cloudflare Dashboard (recommended if no Wrangler)
+
+1. Open **Workers & Pages** → your worker → **Edit Code**.
+2. Replace the editor contents with the full contents of [`worker.js`](worker.js).
+3. **Save and Deploy**.
+4. Set secrets under **Settings → Variables**:
+   - `LISTENER_SECRET`
+   - `JACKPOT_SECRET`
+5. Set plain-text variables:
+   - `WP_SITES` — JSON array of sites
+   - `LISTENER_CONTROL_URL` — Node listener control base URL
+   - Optional: `FORWARD_RETRIES`, `FORWARD_TIMEOUT_MS`, `CONTROL_TIMEOUT_MS`
+
+## Setup (Wrangler, optional)
 
 ```bash
 cd cloudflare-worker
@@ -37,12 +53,13 @@ WP_SITES = '[
 - No `secret` on a site → the Worker signs with the shared `JACKPOT_SECRET`.
 - A site with its own `secret` → that site's `wp-config.php` must use the same value.
 
-## Run / deploy
+## Run / deploy (Wrangler)
 
 ```bash
 npm run dev      # local dev at http://localhost:8787
-npm run deploy   # deploy; prints your https://jackpot-worker.<sub>.workers.dev URL
+npm run deploy   # deploys worker.js
 npm run tail     # live logs
+npm test         # unit tests
 ```
 
 ## Contract
@@ -58,8 +75,7 @@ npm run tail     # live logs
 - Returns `200` if everything succeeded, `207` if any site/message failed
   (per-message, per-site detail in `results`), plus a `metrics` summary.
 
-Optional tuning vars (`wrangler.toml`): `FORWARD_RETRIES`, `FORWARD_TIMEOUT_MS`,
-`CONTROL_TIMEOUT_MS`.
+Optional tuning vars: `FORWARD_RETRIES`, `FORWARD_TIMEOUT_MS`, `CONTROL_TIMEOUT_MS`.
 
 ## MQTT control endpoints (v3.1)
 
@@ -75,8 +91,6 @@ Auth (either):
 
 - Header `x-listener-secret: <LISTENER_SECRET>` (cron / scripts), or
 - Header `X-Signature: <hmac-sha256(JACKPOT_SECRET, body)>` (WordPress AJAX)
-
-Set in `wrangler.toml`:
 
 ```toml
 LISTENER_CONTROL_URL = "https://your-listener-host:3099"

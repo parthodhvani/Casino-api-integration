@@ -6,11 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hmacSha256Hex, timingSafeEqual } from '../src/hmac.js';
-import { parseSites } from '../src/sites.js';
-import { validateMessage, parseBody } from '../src/validator.js';
-import { forwardToSite } from '../src/forwarder.js';
-import { forwardControl } from '../src/control.js';
+import { hmacSha256Hex, timingSafeEqual, parseSites, validateMessage, parseBody, forwardToSite, forwardControl } from '../worker.js';
 
 test('hmacSha256Hex produces a 64-char hex digest', async () => {
   const sig = await hmacSha256Hex('secret', 'hello');
