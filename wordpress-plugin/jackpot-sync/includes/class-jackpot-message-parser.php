@@ -4,7 +4,7 @@
  *
  * Converts raw semicolon-separated DRGT messages (used by the admin tester)
  * into canonical payloads, and validates decoded JSON payloads coming from the
- * Cloudflare Worker. Never throws — always returns an array or WP_Error.
+ * Node MQTT listener. Never throws — always returns an array or WP_Error.
  *
  * @package JackpotSync
  */

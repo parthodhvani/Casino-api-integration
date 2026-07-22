@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Jackpot Sync
- * Description: Fully automated real-time jackpot sync. Receives signed jackpot data from the Cloudflare Worker and creates/updates Jackpot posts + ACF fields automatically. Configure under Settings > Jackpot Sync.
- * Version:     3.1.0
+ * Description: Fully automated real-time jackpot sync. Receives signed jackpot data from the Node MQTT listener and creates/updates Jackpot posts + ACF fields automatically. Configure under Settings > Jackpot Sync.
+ * Version:     3.2.0
  * Author:      Rise Web
  * License:     GPLv2 or later
  * Text Domain: jackpot-sync
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('JACKPOT_SYNC_VERSION', '3.1.0');
+define('JACKPOT_SYNC_VERSION', '3.2.0');
 define('JACKPOT_SYNC_DIR', plugin_dir_path(__FILE__));
 define('JACKPOT_SYNC_URL', plugin_dir_url(__FILE__));
 define('JACKPOT_SYNC_BASENAME', plugin_basename(__FILE__));

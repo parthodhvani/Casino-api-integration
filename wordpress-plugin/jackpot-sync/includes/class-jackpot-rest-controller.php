@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * HTTP entry point for the Worker.
+ * HTTP entry point for the Node MQTT listener.
  */
 class Jackpot_Sync_Rest_Controller {
 

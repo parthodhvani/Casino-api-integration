@@ -1,19 +1,24 @@
 /**
  * HTTP control server for MQTT start / stop / status.
- * Compatible with Node.js 14+ (uses url.parse when URL global quirks appear).
+ * Compatible with Node.js 14+ / cPanel + LiteSpeed.
  *
- * Endpoints (all require x-listener-secret):
+ * Endpoints:
  *   POST /start  → startMQTT()
  *   POST /stop   → stopMQTT()
  *   GET  /status → getStatus()
- *   GET  /health → liveness (no auth; process is up)
+ *   GET  /health → liveness (no auth)
+ *
+ * Auth (either one):
+ *   x-listener-secret: LISTENER_SECRET
+ *   X-Signature: HMAC-SHA256(JACKPOT_SECRET, body)
  */
 
 'use strict';
 
+const fs = require('fs');
 const http = require('http');
 const { URL } = require('url');
-const { timingSafeEqualString } = require('./security');
+const { timingSafeEqualString, hmacSha256Hex } = require('./security');
 const logger = require('./logger');
 
 /**
@@ -27,7 +32,6 @@ function createControlServer(options) {
   const mqttManager = options.mqttManager;
 
   const server = http.createServer(function (req, res) {
-    // Wrap async work so Node 14 server callback stays sync-safe.
     handleRequest(req, res, config, mqttManager).catch(function (err) {
       logger.error('control handler error', {
         error: err && err.message ? err.message : String(err),
@@ -39,6 +43,23 @@ function createControlServer(options) {
   });
 
   return server;
+}
+
+/**
+ * @param {http.IncomingMessage} req
+ * @returns {Promise<string>}
+ */
+function readBody(req) {
+  return new Promise(function (resolve, reject) {
+    const chunks = [];
+    req.on('data', function (c) {
+      chunks.push(c);
+    });
+    req.on('end', function () {
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    });
+    req.on('error', reject);
+  });
 }
 
 /**
@@ -58,13 +79,17 @@ async function handleRequest(req, res, config, mqttManager) {
     return sendJson(res, 200, {
       ok: true,
       service: 'jackpot-mqtt-listener',
-      version: '3.1.1',
+      version: '3.2.1',
       node: process.versions.node,
+      listenMode: config.control.mode || null,
       mqtt: mqttManager.isRunning() ? 'Running' : 'Stopped',
     });
   }
 
-  if (!authenticate(req, config.control.listenerSecret)) {
+  const needsBody = method === 'POST';
+  const bodyText = needsBody ? await readBody(req) : '';
+
+  if (!authenticate(req, config, bodyText)) {
     logger.warn('control unauthorized', { path: path, method: method });
     return sendJson(res, 401, { error: 'unauthorized' });
   }
@@ -90,13 +115,28 @@ async function handleRequest(req, res, config, mqttManager) {
 
 /**
  * @param {http.IncomingMessage} req
- * @param {string} expected
+ * @param {object} config
+ * @param {string} bodyText
  * @returns {boolean}
  */
-function authenticate(req, expected) {
-  if (!expected) return false;
+function authenticate(req, config, bodyText) {
+  const listenerSecret = config.control && config.control.listenerSecret;
   const provided = req.headers['x-listener-secret'] || '';
-  return timingSafeEqualString(String(provided), String(expected));
+  if (listenerSecret && timingSafeEqualString(String(provided), String(listenerSecret))) {
+    return true;
+  }
+
+  const jackpotSecret =
+    (config.wp && config.wp.defaultSecret) || process.env.JACKPOT_SECRET || '';
+  const signature = req.headers['x-signature'] || '';
+  if (jackpotSecret && signature) {
+    const expected = hmacSha256Hex(jackpotSecret, bodyText || '');
+    if (timingSafeEqualString(String(signature), String(expected))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -114,17 +154,59 @@ function sendJson(res, status, body) {
 }
 
 /**
+ * Bind HTTP server.
+ *
+ * cPanel + LiteSpeed: mode "litespeed-auto" → server.listen(callback) with NO
+ * port/host. LSWS injects its Unix socket. Specifying 0.0.0.0:3099 causes 503.
+ *
  * @param {http.Server} server
- * @param {{host:string,port:number}} bind
+ * @param {{host:string|null,port:string|number|null,mode?:string}} bind
  * @returns {Promise<http.Server>}
  */
 function listen(server, bind) {
   return new Promise(function (resolve, reject) {
     server.once('error', reject);
-    server.listen(bind.port, bind.host, function () {
+
+    const onListening = function () {
       server.removeListener('error', reject);
+      const addr = server.address();
+      logger.info('control bind ready', {
+        mode: bind.mode || null,
+        address: addr,
+      });
       resolve(server);
-    });
+    };
+
+    const mode = bind.mode || '';
+    const port = bind.port;
+
+    // Official LiteSpeed / CloudLinux Node selector pattern
+    if (mode === 'litespeed-auto' || (port == null && bind.host == null && mode !== 'unix-socket')) {
+      server.listen(onListening);
+      return;
+    }
+
+    // Unix socket: remove stale file then listen on path only.
+    if (typeof port === 'string' && port.indexOf('/') !== -1) {
+      try {
+        if (fs.existsSync(port)) {
+          fs.unlinkSync(port);
+        }
+      } catch (err) {
+        logger.warn('could not remove stale socket', {
+          socket: port,
+          error: err && err.message ? err.message : String(err),
+        });
+      }
+      server.listen(port, onListening);
+      return;
+    }
+
+    if (bind.host) {
+      server.listen(port, bind.host, onListening);
+    } else {
+      server.listen(port, onListening);
+    }
   });
 }
 

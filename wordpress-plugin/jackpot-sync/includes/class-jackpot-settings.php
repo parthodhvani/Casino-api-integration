@@ -30,8 +30,9 @@ class Jackpot_Sync_Settings {
     public static function defaults() {
         return [
             'secret'              => '',
-            // Cloudflare Worker base URL used for MQTT start/stop/status control.
-            'worker_url'          => '',
+            // Public base URL of the Node MQTT listener control API
+            // (e.g. https://mqtt.waayup.be) — used for Start / Stop / Status.
+            'listener_url'        => '',
             'cpt'                 => 'jackpot',
             // ACF field names. Per the brief the two live ACF fields are
             // "amount" and "shared_profit_amount".
@@ -56,7 +57,14 @@ class Jackpot_Sync_Settings {
             $stored = [];
         }
 
-        return wp_parse_args($stored, self::defaults());
+        $settings = wp_parse_args($stored, self::defaults());
+
+        // One-time migration: old "worker_url" → "listener_url".
+        if (empty($settings['listener_url']) && !empty($stored['worker_url'])) {
+            $settings['listener_url'] = $stored['worker_url'];
+        }
+
+        return $settings;
     }
 
     /**
@@ -71,6 +79,11 @@ class Jackpot_Sync_Settings {
     public static function get($key) {
         if ($key === 'secret' && defined('JACKPOT_SECRET') && JACKPOT_SECRET !== '') {
             return JACKPOT_SECRET;
+        }
+
+        // Alias: never look up worker_url — always use listener_url.
+        if ($key === 'worker_url') {
+            $key = 'listener_url';
         }
 
         $settings = self::all();
@@ -98,8 +111,17 @@ class Jackpot_Sync_Settings {
         $input    = is_array($input) ? $input : [];
         $out      = [];
 
-        $out['secret']       = isset($input['secret']) ? trim(sanitize_text_field($input['secret'])) : '';
-        $out['worker_url']   = isset($input['worker_url']) ? esc_url_raw(trim((string) $input['worker_url'])) : '';
+        $out['secret'] = isset($input['secret']) ? trim(sanitize_text_field($input['secret'])) : '';
+
+        // Accept listener_url; also accept legacy form field name worker_url once.
+        if (isset($input['listener_url'])) {
+            $out['listener_url'] = esc_url_raw(trim((string) $input['listener_url']));
+        } elseif (isset($input['worker_url'])) {
+            $out['listener_url'] = esc_url_raw(trim((string) $input['worker_url']));
+        } else {
+            $out['listener_url'] = '';
+        }
+
         $out['cpt']          = !empty($input['cpt']) ? sanitize_key($input['cpt']) : $defaults['cpt'];
         $out['field_amount'] = !empty($input['field_amount']) ? sanitize_key($input['field_amount']) : $defaults['field_amount'];
         $out['field_shared'] = !empty($input['field_shared']) ? sanitize_key($input['field_shared']) : $defaults['field_shared'];
@@ -113,7 +135,7 @@ class Jackpot_Sync_Settings {
     }
 
     /**
-     * Public REST endpoint URL (where the Worker POSTs).
+     * Public REST endpoint URL (where the Node listener POSTs).
      *
      * @return string
      */

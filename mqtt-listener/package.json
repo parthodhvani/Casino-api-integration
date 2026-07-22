@@ -1,8 +1,8 @@
 {
   "name": "jackpot-mqtt-listener",
-  "version": "3.1.1",
+  "version": "3.2.1",
   "private": true,
-  "description": "Controllable MQTT listener (Node 14+ / cPanel compatible) that forwards DRGT jackpot messages to the Cloudflare Worker.",
+  "description": "Controllable MQTT listener (Node 14+ / cPanel + LiteSpeed) that forwards DRGT jackpot messages to WordPress sites.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

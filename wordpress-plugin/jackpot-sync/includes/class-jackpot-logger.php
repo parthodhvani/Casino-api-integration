@@ -81,7 +81,7 @@ class Jackpot_Sync_Logger {
             'last_message_type'  => '',
             'last_config_time'   => '',
             'last_update_time'   => '',
-            'last_worker_time'   => '',
+            'last_listener_time' => '',
             'jackpots_created'   => 0,
             'jackpots_updated'   => 0,
             'jackpots_skipped'   => 0,
@@ -91,8 +91,8 @@ class Jackpot_Sync_Logger {
             'last_error'         => '',
             'last_http_code'     => 0,
             'last_execution_ms'  => 0,
-            'worker_status'      => 'No request received yet',
-            // MQTT listener control (Feature 8).
+            'listener_status'    => 'No request received yet',
+            // MQTT listener control.
             'mqtt_state'         => 'Unknown',
             'mqtt_last_sync'     => '',
             'mqtt_last_message'  => '',
@@ -111,7 +111,17 @@ class Jackpot_Sync_Logger {
             $stored = [];
         }
 
-        return wp_parse_args($stored, self::stats_defaults());
+        $stats = wp_parse_args($stored, self::stats_defaults());
+
+        // Migrate legacy worker_* keys if present.
+        if (empty($stats['listener_status']) && !empty($stored['worker_status'])) {
+            $stats['listener_status'] = $stored['worker_status'];
+        }
+        if (empty($stats['last_listener_time']) && !empty($stored['last_worker_time'])) {
+            $stats['last_listener_time'] = $stored['last_worker_time'];
+        }
+
+        return $stats;
     }
 
     /**
