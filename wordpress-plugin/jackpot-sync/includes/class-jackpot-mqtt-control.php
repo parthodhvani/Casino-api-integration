@@ -2,9 +2,9 @@
 /**
  * MQTT Listener control client.
  *
- * Talks to the Cloudflare Worker control endpoints (/start, /stop, /status),
- * which proxy to the Node MQTT listener. Authenticated with HMAC-SHA256 using
- * the same shared secret as the REST update endpoint.
+ * Talks directly to the Node MQTT listener control API
+ * (/start, /stop, /status). Authenticated with HMAC-SHA256 using the same
+ * shared secret as the REST update endpoint.
  *
  * @package JackpotSync
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Proxies admin MQTT controls through the Worker.
+ * Calls the Node MQTT listener control endpoints from wp-admin.
  */
 class Jackpot_Sync_Mqtt_Control {
 
@@ -67,7 +67,7 @@ class Jackpot_Sync_Mqtt_Control {
     }
 
     /**
-     * Start MQTT via the Worker.
+     * Start MQTT via the Node listener.
      *
      * @return array<string,mixed> Normalized result for AJAX.
      */
@@ -84,7 +84,7 @@ class Jackpot_Sync_Mqtt_Control {
     }
 
     /**
-     * Stop MQTT via the Worker.
+     * Stop MQTT via the Node listener.
      *
      * @return array<string,mixed>
      */
@@ -101,7 +101,7 @@ class Jackpot_Sync_Mqtt_Control {
     }
 
     /**
-     * Fetch live MQTT status via the Worker and cache it.
+     * Fetch live MQTT status via the Node listener and cache it.
      *
      * @return array<string,mixed>
      */
@@ -110,20 +110,20 @@ class Jackpot_Sync_Mqtt_Control {
     }
 
     /**
-     * Perform a signed control request against the Worker.
+     * Perform a signed control request against the Node listener.
      *
      * @param string $action start|stop|status
      * @param string $method GET|POST
      * @return array<string,mixed>
      */
     private static function request($action, $method) {
-        $worker_url = Jackpot_Sync_Settings::get('worker_url');
-        $secret     = Jackpot_Sync_Settings::get('secret');
+        $listener_url = Jackpot_Sync_Settings::get('listener_url');
+        $secret       = Jackpot_Sync_Settings::get('secret');
 
-        if (empty($worker_url)) {
+        if (empty($listener_url)) {
             return self::fail(
-                'worker_not_configured',
-                __('Worker URL is not configured. Add it under Settings → Jackpot Sync.', 'jackpot-sync')
+                'listener_not_configured',
+                __('Listener URL is not configured. Add it under Settings → Jackpot Sync.', 'jackpot-sync')
             );
         }
 
@@ -134,7 +134,7 @@ class Jackpot_Sync_Mqtt_Control {
             );
         }
 
-        $url  = self::control_url($worker_url, $action);
+        $url  = self::control_url($listener_url, $action);
         $body = ($method === 'POST') ? '{}' : '';
         $sig  = hash_hmac('sha256', $body, $secret);
 
@@ -163,17 +163,17 @@ class Jackpot_Sync_Mqtt_Control {
                     'timeout',
                     sprintf(
                         /* translators: %s: error detail */
-                        __('Request to Worker timed out or failed: %s', 'jackpot-sync'),
+                        __('Request to MQTT listener timed out or failed: %s', 'jackpot-sync'),
                         $msg
                     )
                 );
             }
 
             return self::fail(
-                'worker_unavailable',
+                'listener_unavailable',
                 sprintf(
                     /* translators: %s: error detail */
-                    __('Worker unavailable: %s', 'jackpot-sync'),
+                    __('MQTT listener unavailable: %s', 'jackpot-sync'),
                     $msg
                 )
             );
@@ -186,7 +186,7 @@ class Jackpot_Sync_Mqtt_Control {
         if ($http_code === 401) {
             return self::fail(
                 'auth_failure',
-                __('Authentication failed. Check that the shared secret matches JACKPOT_SECRET on the Worker.', 'jackpot-sync'),
+                __('Authentication failed. Check that the shared secret matches JACKPOT_SECRET on the Node listener.', 'jackpot-sync'),
                 $http_code
             );
         }
@@ -194,14 +194,14 @@ class Jackpot_Sync_Mqtt_Control {
         if ($http_code === 502 || $http_code === 504) {
             $detail = is_array($data) && !empty($data['error']) ? $data['error'] : __('Node listener unavailable.', 'jackpot-sync');
             $hint   = is_array($data) && !empty($data['hint']) ? ' ' . $data['hint'] : '';
-            $body   = is_array($data) && !empty($data['body']) ? ' Response: ' . $data['body'] : '';
+            $body_s = is_array($data) && !empty($data['body']) ? ' Response: ' . $data['body'] : '';
             return self::fail(
                 'node_unavailable',
                 sprintf(
                     /* translators: %s: error detail */
                     __('Node listener error: %s', 'jackpot-sync'),
                     $detail
-                ) . $hint . $body,
+                ) . $hint . $body_s,
                 $http_code,
                 is_array($data) ? $data : []
             );
@@ -209,18 +209,24 @@ class Jackpot_Sync_Mqtt_Control {
 
         if ($http_code === 500 && is_array($data) && !empty($data['error'])) {
             $hint = !empty($data['hint']) ? ' ' . $data['hint'] : '';
-            return self::fail('worker_error', (string) $data['error'] . $hint, $http_code, $data);
+            return self::fail('listener_error', (string) $data['error'] . $hint, $http_code, $data);
         }
 
         if (!is_array($data)) {
+            $snippet = preg_replace('/\s+/', ' ', (string) $raw);
+            $snippet = substr(trim($snippet), 0, 180);
+            $looks_html = (bool) preg_match('/<\s*!doctype|<\s*html|<\s*\?php/i', (string) $raw);
+            $hint = $looks_html
+                ? ' The Listener URL returned HTML/PHP instead of JSON. In WP settings set MQTT Listener URL to the Node app base URL that returns JSON at /health (e.g. https://mqtt.waayup.be). Confirm in a browser: that URL + /health must show {"ok":true,...}.'
+                : ' Check MQTT Listener URL points at the Node control API (GET /status returns JSON).';
             return self::fail(
                 'invalid_response',
-                __('Invalid JSON response from Worker.', 'jackpot-sync'),
+                __('Invalid JSON response from MQTT listener.', 'jackpot-sync')
+                    . ' HTTP ' . $http_code . '. Body: ' . $snippet . '.' . $hint,
                 $http_code
             );
         }
 
-        // Normalize + cache status-like payloads.
         $normalized = self::normalize_payload($action, $data, $http_code);
         if (!empty($normalized['status_payload'])) {
             self::cache_status($normalized['status_payload']);
@@ -229,13 +235,12 @@ class Jackpot_Sync_Mqtt_Control {
         Jackpot_Sync_Logger::log(
             'MQTT control: ' . $action,
             [
-                'ok'        => $normalized['ok'],
-                'http'      => $http_code,
-                'status'    => $normalized['status_payload']['status'] ?? ($data['status'] ?? ''),
+                'ok'     => $normalized['ok'],
+                'http'   => $http_code,
+                'status' => $normalized['status_payload']['status'] ?? ($data['status'] ?? ''),
             ]
         );
 
-        // Mirror useful timestamps into runtime stats when present.
         $stats_update = [];
         if (!empty($normalized['status_payload']['lastSyncTime'])) {
             $stats_update['mqtt_last_sync'] = $normalized['status_payload']['lastSyncTime'];
@@ -257,9 +262,9 @@ class Jackpot_Sync_Mqtt_Control {
     }
 
     /**
-     * Build Worker control URL.
+     * Build Node listener control URL.
      *
-     * @param string $base   Worker base URL.
+     * @param string $base   Listener control base URL.
      * @param string $action Control action.
      * @return string
      */
@@ -269,7 +274,7 @@ class Jackpot_Sync_Mqtt_Control {
     }
 
     /**
-     * Normalize Worker/Node responses into a consistent AJAX payload.
+     * Normalize Node responses into a consistent AJAX payload.
      *
      * @param string              $action    Control action.
      * @param array<string,mixed> $data      Decoded JSON.
@@ -292,20 +297,19 @@ class Jackpot_Sync_Mqtt_Control {
                 'source'           => 'live',
             ];
         } elseif ($action === 'start' || $action === 'stop') {
-            // After start/stop, synthesize a minimal status for the UI.
-            $label = 'Unknown';
+            $label   = 'Unknown';
             $running = null;
             if (!empty($data['status'])) {
                 if ($data['status'] === 'started' || $data['status'] === 'already_running') {
-                    $label = 'Running';
+                    $label   = 'Running';
                     $running = true;
                 } elseif ($data['status'] === 'stopped' || $data['status'] === 'already_stopped') {
-                    $label = 'Stopped';
+                    $label   = 'Stopped';
                     $running = false;
                 }
             }
             if ($running !== null) {
-                $cached = self::get_cached_status();
+                $cached         = self::get_cached_status();
                 $status_payload = array_merge($cached, [
                     'status'  => $label,
                     'running' => $running,
@@ -319,7 +323,7 @@ class Jackpot_Sync_Mqtt_Control {
             $message = (string) $data['status'];
         } elseif (isset($data['error'])) {
             $message = (string) $data['error'];
-            $ok = false;
+            $ok      = false;
         }
 
         return [
@@ -378,7 +382,6 @@ class Jackpot_Sync_Mqtt_Control {
             return (string) $iso;
         }
 
-        // Prefer wp_date when available (WP 5.3+); fall back for stubbed tests.
         if (function_exists('wp_date')) {
             return wp_date('j M Y g:i A', $ts);
         }

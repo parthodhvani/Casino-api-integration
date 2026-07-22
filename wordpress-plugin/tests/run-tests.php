@@ -185,13 +185,14 @@ echo "\n== MQTT control settings + cache ==\n";
 require $base . 'class-jackpot-mqtt-control.php';
 _jp_reset_store();
 $defaults = Jackpot_Sync_Settings::defaults();
-check('settings include worker_url', array_key_exists('worker_url', $defaults));
+check('settings include listener_url', array_key_exists('listener_url', $defaults));
+check('settings do not include worker_url', !array_key_exists('worker_url', $defaults));
 $san = Jackpot_Sync_Settings::sanitize([
-    'secret'     => 'abc',
-    'worker_url' => 'https://jackpot-worker.example.workers.dev/',
-    'cpt'        => 'jackpot',
+    'secret'       => 'abc',
+    'listener_url' => 'https://mqtt.example.com/',
+    'cpt'          => 'jackpot',
 ]);
-check('sanitize keeps worker_url host', strpos($san['worker_url'], 'jackpot-worker.example.workers.dev') !== false);
+check('sanitize keeps listener_url host', strpos($san['listener_url'], 'mqtt.example.com') !== false);
 
 Jackpot_Sync_Mqtt_Control::cache_status([
     'status'           => 'Running',
@@ -208,8 +209,9 @@ check('mqtt format_time empty', Jackpot_Sync_Mqtt_Control::format_time('') === '
 check('mqtt format_time iso', Jackpot_Sync_Mqtt_Control::format_time('2026-07-14T06:42:00.000Z') !== '—');
 
 $fail = Jackpot_Sync_Mqtt_Control::status();
-check('mqtt status fails without worker_url', $fail['ok'] === false);
-check('mqtt status error code worker_not_configured', ($fail['error_code'] ?? '') === 'worker_not_configured');
+check('mqtt status fails without listener_url', $fail['ok'] === false);
+check('mqtt status error code listener_not_configured', ($fail['error_code'] ?? '') === 'listener_not_configured');
+check('mqtt status message has no Worker', strpos($fail['message'], 'Worker') === false);
 
 echo "\n----------------------------------------\n";
 echo "Passed: {$passed}, Failed: {$failed}\n";

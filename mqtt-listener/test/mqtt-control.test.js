@@ -47,7 +47,13 @@ test('startMQTT / stopMQTT / already_running / getStatus', async function () {
       reconnectPeriodMs: 1000,
       connectTimeoutMs: 1000,
     },
-    worker: { url: 'https://w', listenerSecret: 's', retries: 0, timeoutMs: 100, backoffMs: 1 },
+    wp: {
+      sites: [{ name: 's', url: 'https://example.com/u' }],
+      defaultSecret: 's',
+      retries: 0,
+      timeoutMs: 100,
+      backoffMs: 1,
+    },
     runtime: { healthcheckUrl: '' },
   };
 

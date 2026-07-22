@@ -1,6 +1,11 @@
 /**
- * Constant-time string compare for secret headers.
+ * Security helpers: constant-time compare + HMAC-SHA256 signing.
+ * Compatible with Node.js 14+.
  */
+
+'use strict';
+
+const crypto = require('crypto');
 
 /**
  * @param {string} a
@@ -12,12 +17,26 @@ function timingSafeEqualString(a, b) {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
   if (bufA.length !== bufB.length) {
-    // Still compare to avoid leaking length via timing of an early return alone.
     const dummy = Buffer.alloc(bufA.length);
-    require('crypto').timingSafeEqual(bufA, dummy);
+    crypto.timingSafeEqual(bufA, dummy);
     return false;
   }
-  return require('crypto').timingSafeEqual(bufA, bufB);
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
-module.exports = { timingSafeEqualString };
+/**
+ * Compute a lowercase hex HMAC-SHA256 of `message` using `secret`.
+ * Matches WordPress hash_hmac('sha256', $body, $secret).
+ *
+ * @param {string} secret
+ * @param {string} message
+ * @returns {string}
+ */
+function hmacSha256Hex(secret, message) {
+  return crypto.createHmac('sha256', String(secret)).update(String(message), 'utf8').digest('hex');
+}
+
+module.exports = {
+  timingSafeEqualString: timingSafeEqualString,
+  hmacSha256Hex: hmacSha256Hex,
+};

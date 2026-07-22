@@ -4,6 +4,8 @@
  *
  * Owns the single MQTT client for this process. Connect only via startMQTT();
  * disconnect via stopMQTT(). The Node process itself is never terminated here.
+ *
+ * Forwards parsed messages directly to WordPress sites.
  */
 
 'use strict';
@@ -11,7 +13,7 @@
 const mqtt = require('mqtt');
 const logger = require('./logger');
 const { parseMessage } = require('./parser');
-const { forwardToWorker, pingHealthcheck } = require('./forwarder');
+const { forwardToSites, pingHealthcheck } = require('./forwarder');
 
 let client = null;
 let running = false;
@@ -109,8 +111,6 @@ function attachHandlers(c, config) {
 
   c.on('error', function (err) {
     state.lastError = err.message;
-    // Keep "running" intent; only mark error if we are not currently connected.
-    // Transient TLS/DNS blips must not stick forever once messages resume.
     if (state.connectionState !== 'connected') {
       state.connectionState = 'error';
     }
@@ -120,7 +120,6 @@ function attachHandlers(c, config) {
   c.on('message', async function (topic, message) {
     if (!running) return;
 
-    // Receiving a message proves the session is up — clear sticky error state.
     state.connectionState = 'connected';
     state.lastError = null;
 
@@ -140,7 +139,7 @@ function attachHandlers(c, config) {
       state.lastConfigUpdate = new Date().toISOString();
     }
 
-    const delivered = await forwardToWorker(payload, config.worker);
+    const delivered = await forwardToSites(payload, config.wp);
     if (delivered) {
       state.forwarded++;
       state.lastSyncTime = new Date().toISOString();
@@ -218,9 +217,6 @@ async function stopMQTT() {
 }
 
 /**
- * mqtt@4: end([force], [callback]) or end([force], [options], [callback])
- * Support both mqtt@4 and mqtt@5 callback shapes.
- *
  * @param {boolean} force
  * @returns {Promise<void>}
  */
@@ -249,7 +245,6 @@ function endClient(force) {
     };
 
     try {
-      // mqtt v4 accepts (force, cb). mqtt v5 accepts (force, opts, cb).
       if (c.end.length >= 3) {
         c.end(force, {}, finish);
       } else {

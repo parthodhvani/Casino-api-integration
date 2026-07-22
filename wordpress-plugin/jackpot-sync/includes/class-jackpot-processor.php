@@ -80,14 +80,14 @@ class Jackpot_Sync_Processor {
         $error      = isset($result->context['error']) ? (string) $result->context['error'] : '';
 
         $stats = [
-            'last_update'       => current_time('mysql'),
-            'last_worker_time'  => current_time('mysql'),
-            'last_jpid'         => $jp_id,
-            'last_casino_id'    => $cas_id,
-            'last_message_type' => $type,
-            'last_execution_ms' => $elapsed_ms,
-            'last_http_code'    => $result->status,
-            'worker_status'     => $result->is_success() ? 'Healthy (last request succeeded)' : 'Error on last request',
+            'last_update'        => current_time('mysql'),
+            'last_listener_time' => current_time('mysql'),
+            'last_jpid'          => $jp_id,
+            'last_casino_id'     => $cas_id,
+            'last_message_type'  => $type,
+            'last_execution_ms'  => $elapsed_ms,
+            'last_http_code'     => $result->status,
+            'listener_status'    => $result->is_success() ? 'Healthy (last request succeeded)' : 'Error on last request',
         ];
 
         if ($error !== '') {
