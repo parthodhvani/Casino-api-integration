@@ -123,7 +123,7 @@ class Jackpot_Sync_Mqtt_Control {
         if (empty($listener_url)) {
             return self::fail(
                 'listener_not_configured',
-                __('Listener URL is not configured. Add it under Settings → Jackpot Sync.', 'jackpot-sync')
+                __('Listener URL is not configured. Add it under Jackpot Sync → Settings.', 'jackpot-sync')
             );
         }
 
