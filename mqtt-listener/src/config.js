@@ -38,32 +38,105 @@ function optionalHHMM(name, fallback) {
   return /^\d{2}:\d{2}$/.test(raw) ? raw : fallback;
 }
 
+/**
+ * Normalize one site object from parsed JSON.
+ * @param {object} s
+ * @param {number} i
+ * @returns {{name:string,url:string,secret?:string}|null}
+ */
+function normalizeSite(s, i) {
+  if (!s || typeof s.url !== 'string' || !s.url) return null;
+  const site = {
+    name: typeof s.name === 'string' && s.name ? s.name : 'site' + (i + 1),
+    url: s.url.trim(),
+  };
+  if (typeof s.secret === 'string' && s.secret) {
+    site.secret = s.secret;
+  }
+  return site;
+}
+
+/**
+ * Parse WP_SITES. Accepts:
+ * - JSON array: [{"name":"x","url":"https://.../wp-json/jackpot/v1/update"}]
+ * - Single URL string: https://.../wp-json/jackpot/v1/update
+ *
+ * Keys MUST use double quotes. Wrong: [{name:"x"}]  Right: [{"name":"x"}]
+ *
+ * @param {string} raw
+ * @returns {Array<{name:string,url:string,secret?:string}>}
+ */
 function parseWpSites(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) {
+    console.error('[fatal] WP_SITES is empty');
+    process.exit(1);
+  }
+
+  // Single URL (no JSON) — easiest for cPanel one-site setups
+  if (/^https?:\/\//i.test(trimmed) && trimmed.indexOf('[') === -1) {
+    return [
+      {
+        name: process.env.WP_SITE_NAME || 'site1',
+        url: trimmed,
+      },
+    ];
+  }
+
   let arr;
   try {
-    arr = JSON.parse(raw);
+    arr = JSON.parse(trimmed);
   } catch (err) {
+    const preview = trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed;
     console.error('[fatal] WP_SITES must be valid JSON: ' + (err && err.message ? err.message : err));
+    console.error('[fatal] WP_SITES value preview: ' + preview);
+    console.error(
+      '[fatal] Example (one line, double quotes on keys): ' +
+        '[{"name":"casinoberck","url":"https://www.example.com/wp-json/jackpot/v1/update"}]'
+    );
+    console.error(
+      '[fatal] Or set WP_SITES to just the URL: https://www.example.com/wp-json/jackpot/v1/update'
+    );
     process.exit(1);
   }
+
+  if (arr && typeof arr === 'object' && !Array.isArray(arr) && typeof arr.url === 'string') {
+    arr = [arr];
+  }
+
   if (!Array.isArray(arr)) {
-    console.error('[fatal] WP_SITES must be a JSON array');
+    console.error('[fatal] WP_SITES must be a JSON array (or a single https URL)');
     process.exit(1);
   }
+
   const sites = [];
   for (let i = 0; i < arr.length; i++) {
-    const s = arr[i];
-    if (!s || typeof s.url !== 'string' || !s.url) continue;
-    const site = {
-      name: typeof s.name === 'string' && s.name ? s.name : 'site' + (i + 1),
-      url: s.url,
-    };
-    if (typeof s.secret === 'string' && s.secret) {
-      site.secret = s.secret;
-    }
-    sites.push(site);
+    const site = normalizeSite(arr[i], i);
+    if (site) sites.push(site);
   }
   return sites;
+}
+
+/**
+ * Resolve sites from WP_SITES or simple WP_SITE_URL fallback.
+ * @returns {Array<{name:string,url:string,secret?:string}>}
+ */
+function resolveWpSites() {
+  const raw = process.env.WP_SITES;
+  if (raw !== undefined && String(raw).trim() !== '') {
+    return parseWpSites(raw);
+  }
+  const url = process.env.WP_SITE_URL;
+  if (url && String(url).trim() !== '') {
+    return [
+      {
+        name: process.env.WP_SITE_NAME || 'site1',
+        url: String(url).trim(),
+      },
+    ];
+  }
+  console.error('[fatal] Missing WP_SITES (JSON or URL) or WP_SITE_URL');
+  process.exit(1);
 }
 
 /**
@@ -114,7 +187,7 @@ const topics = required('MQTT_TOPIC')
 
 const listenerSecret = required('LISTENER_SECRET');
 const jackpotSecret = process.env.JACKPOT_SECRET || '';
-const sites = parseWpSites(required('WP_SITES'));
+const sites = resolveWpSites();
 
 if (sites.length === 0) {
   console.error('[fatal] WP_SITES must contain at least one site with a url');
@@ -172,3 +245,4 @@ config.mqtt.brokerUrl = 'mqtts://' + config.mqtt.host + ':' + config.mqtt.port;
 
 module.exports = config;
 module.exports.resolveListenTarget = resolveListenTarget;
+module.exports.parseWpSites = parseWpSites;

@@ -57,3 +57,30 @@ test('resolveListenTarget defaults to litespeed-auto', function () {
     else process.env[k] = saved[k];
   });
 });
+
+test('parseWpSites accepts JSON array and plain URL', function () {
+  process.env.MQTT_TOPIC = process.env.MQTT_TOPIC || '/jp/test';
+  process.env.LISTENER_SECRET = process.env.LISTENER_SECRET || 'test-listener';
+  process.env.JACKPOT_SECRET = process.env.JACKPOT_SECRET || 'test-jackpot';
+  process.env.WP_SITES =
+    process.env.WP_SITES ||
+    JSON.stringify([{ name: 't', url: 'https://example.com/wp-json/jackpot/v1/update' }]);
+  process.env.MQTT_HOST = process.env.MQTT_HOST || 'example.hivemq.cloud';
+  process.env.MQTT_USERNAME = process.env.MQTT_USERNAME || 'u';
+  process.env.MQTT_PASSWORD = process.env.MQTT_PASSWORD || 'p';
+
+  const configPath = path.join(__dirname, '../src/config.js');
+  delete require.cache[require.resolve(configPath)];
+  const config = require(configPath);
+  const parse = config.parseWpSites;
+
+  const fromJson = parse(
+    '[{"name":"casinoberck","url":"https://www.example.com/wp-json/jackpot/v1/update"}]'
+  );
+  assert.strictEqual(fromJson.length, 1);
+  assert.strictEqual(fromJson[0].name, 'casinoberck');
+
+  const fromUrl = parse('https://www.example.com/wp-json/jackpot/v1/update');
+  assert.strictEqual(fromUrl.length, 1);
+  assert.strictEqual(fromUrl[0].url, 'https://www.example.com/wp-json/jackpot/v1/update');
+});
