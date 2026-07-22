@@ -1,6 +1,8 @@
 /**
  * Security helpers: constant-time compare + HMAC-SHA256 signing.
  * Compatible with Node.js 14+.
+ *
+ * Keep this file free of local requires (no circular deps).
  */
 
 'use strict';
@@ -18,7 +20,11 @@ function timingSafeEqualString(a, b) {
   const bufB = Buffer.from(b);
   if (bufA.length !== bufB.length) {
     const dummy = Buffer.alloc(bufA.length);
-    crypto.timingSafeEqual(bufA, dummy);
+    try {
+      crypto.timingSafeEqual(bufA, dummy);
+    } catch (_) {
+      /* ignore */
+    }
     return false;
   }
   return crypto.timingSafeEqual(bufA, bufB);

@@ -6,9 +6,13 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const logger = require('./logger');
 const http = require('./http');
-const { hmacSha256Hex } = require('./security');
+
+function hmacSha256Hex(secret, message) {
+  return crypto.createHmac('sha256', String(secret)).update(String(message), 'utf8').digest('hex');
+}
 
 function sleep(ms) {
   return new Promise(function (resolve) {
