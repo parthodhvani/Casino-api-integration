@@ -18,8 +18,29 @@
 const fs = require('fs');
 const http = require('http');
 const { URL } = require('url');
-const { timingSafeEqualString, hmacSha256Hex } = require('./security');
+const crypto = require('crypto');
 const logger = require('./logger');
+
+// Inline crypto helpers so a stale/partial security.js cannot break auth
+// (avoids circular-dependency / missing-export issues on cPanel uploads).
+function timingSafeEqualString(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    try {
+      crypto.timingSafeEqual(bufA, Buffer.alloc(bufA.length));
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function hmacSha256Hex(secret, message) {
+  return crypto.createHmac('sha256', String(secret)).update(String(message), 'utf8').digest('hex');
+}
 
 /**
  * @param {object} options
