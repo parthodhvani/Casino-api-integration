@@ -81,6 +81,12 @@ function wp_json_encode($data) { return json_encode($data); }
 function esc_html($s) { return htmlspecialchars((string) $s, ENT_QUOTES); }
 function __($s, $d = null) { return $s; }
 function esc_html__($s, $d = null) { return $s; }
+if (!function_exists('esc_html_e')) {
+    function esc_html_e($s, $d = null) { echo esc_html(__($s, $d)); }
+}
+if (!function_exists('esc_attr_e')) {
+    function esc_attr_e($s, $d = null) { echo htmlspecialchars((string) __($s, $d), ENT_QUOTES); }
+}
 function esc_url_raw($url) {
     $url = trim((string) $url);
     if ($url === '') {

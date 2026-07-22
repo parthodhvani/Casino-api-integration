@@ -1,17 +1,17 @@
 <?php
 /**
  * Plugin Name: Jackpot Sync
- * Description: Fully automated real-time jackpot sync. Receives signed jackpot data from the Node MQTT listener and creates/updates Jackpot posts + ACF fields automatically. Configure under Settings > Jackpot Sync.
- * Version:     3.2.0
+ * Description: Fully automated real-time jackpot sync. Receives signed jackpot data from the Node MQTT listener and creates/updates Jackpot posts + ACF fields automatically. Configure under Jackpot Sync in the admin menu.
+ * Version:     3.3.0
  * Author:      Rise Web
  * License:     GPLv2 or later
  * Text Domain: jackpot-sync
  * Requires at least: 5.8
  * Requires PHP: 7.4
  *
- * No file editing required — after activating, go to Settings > Jackpot Sync
- * and paste the shared secret. The shared secret may optionally be locked in
- * wp-config.php with: define('JACKPOT_SECRET', '...');
+ * No file editing required — after activating, open Jackpot Sync in the admin
+ * menu and paste the shared secret under Settings. The shared secret may
+ * optionally be locked in wp-config.php with: define('JACKPOT_SECRET', '...');
  *
  * @package JackpotSync
  */
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('JACKPOT_SYNC_VERSION', '3.2.0');
+define('JACKPOT_SYNC_VERSION', '3.3.0');
 define('JACKPOT_SYNC_DIR', plugin_dir_path(__FILE__));
 define('JACKPOT_SYNC_URL', plugin_dir_url(__FILE__));
 define('JACKPOT_SYNC_BASENAME', plugin_basename(__FILE__));
